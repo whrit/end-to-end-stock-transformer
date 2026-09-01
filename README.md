@@ -21,17 +21,24 @@ At each prediction date, the model processes a dynamic cross-section of A-shares
 
 ```mermaid
 flowchart TD
-    A["Raw Market Data<br/>Daily & minute stock/index data<br/>All-A universe · trading calendar"]
-    B["Features & Target<br/>Alpha158 · Intraday 248D<br/>Market63/84 · CSI500-relative 5-day return"]
-    C["Derived Artifacts<br/>arrays · manifests · hashes"]
+    A["Raw Market Data<br/>Stock / index data<br/>Daily · minute<br/>Dynamic All-A · trading calendar"]
+
+    B["Features & Target<br/>Alpha158 · Intraday 248D<br/>Market63/84<br/>CSI500-relative return<br/>Next 5 trading days"]
+
+    C["Precomputed Feature Cache<br/>NPY / mmap<br/>manifest · hash"]
+
     D["8-Day Sequences<br/>cross-sectional normalization<br/>t+6 purge"]
-    E["Transformer Modeling<br/>market-state gating<br/>temporal + cross-sectional attention"]
+
+    E["Transformer Modeling<br/>market-state gating<br/>temporal attention<br/>cross-sectional attention"]
+
     F["Rolling OOS Training<br/>semiannual · warm start<br/>multi-seed"]
-    G["Evaluation<br/>IC · RankIC · Top 5% / Top 10%<br/>MSE · R²"]
+
+    G["Evaluation<br/>IC · RankIC<br/>Top 5% · Top 10%<br/>MSE · R²"]
+
     A --> B --> C --> D --> E --> F --> G
 ```
 
-The workflow writes expensive feature and label computations once as immutable derived artifacts. Training then reads those artifacts into an eight-trading-day rolling dataset; label normalization and feature preprocessing are fitted without future leakage. Data contracts, model architecture, training, rolling scheduling, and evaluation remain separate so neural and tree-based models can be compared under the same temporal protocol.
+Alpha158, Intraday 248D, Market63/84, and labels are computed once and stored as precomputed NPY arrays for repeated use across rolling windows. Training constructs eight-trading-day samples from this cache; label normalization and feature preprocessing are fitted without future leakage. Feature arrays support mmap reads by default, so the full dataset does not need to remain in RAM, while manifests and hashes validate shapes, dates, feature order, and data integrity. This avoids repeatedly parsing raw daily/minute data and recomputing expensive features while keeping data contracts, modeling, rolling scheduling, and evaluation separate.
 
 ## Method
 

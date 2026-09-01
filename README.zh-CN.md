@@ -21,17 +21,24 @@
 
 ```mermaid
 flowchart TD
-    A["原始市场数据<br/>股票/指数日频与分钟行情<br/>全 A 股股票池 · 交易日历"]
-    B["特征与标签<br/>Alpha158 · 分钟量价 248D<br/>Market63/84 · CSI500 相对五日收益"]
-    C["衍生数据<br/>数组 · manifest · hash"]
+    A["原始市场数据<br/>股票 / 指数行情<br/>日频 · 分钟频<br/>动态全 A 股 · 交易日历"]
+
+    B["特征与标签<br/>Alpha158 · 分钟量价 248D<br/>Market63/84<br/>CSI500 相对收益<br/>未来 5 个交易日"]
+
+    C["预计算特征缓存<br/>NPY / mmap<br/>manifest · hash"]
+
     D["8 日时序样本<br/>横截面标准化<br/>t+6 purge"]
-    E["Transformer 建模<br/>市场状态门控<br/>时序 + 横截面注意力"]
-    F["滚动 OOS 训练<br/>半年 · warm start<br/>multi-seed"]
-    G["评估<br/>IC · RankIC · Top 5% / Top 10%<br/>MSE · R²"]
+
+    E["Transformer 建模<br/>市场状态门控<br/>时序注意力<br/>横截面注意力"]
+
+    F["滚动 OOS 训练<br/>半年滚动 · warm start<br/>multi-seed"]
+
+    G["评估<br/>IC · RankIC<br/>Top 5% · Top 10%<br/>MSE · R²"]
+
     A --> B --> C --> D --> E --> F --> G
 ```
 
-高成本的特征与标签只离线计算一次，并写入带 manifest/hash 的不可变衍生数据。训练阶段读取这些数据构造 8 个交易日的时序样本；标签标准化和特征预处理不会使用未来信息。数据契约、模型结构、训练、滚动调度和评估各自独立，使神经网络与树模型能够在统一时间协议下比较。
+Alpha158、分钟量价 248D、Market63/84 和 label 等高成本结果只计算一次，并保存为可供 rolling windows 反复复用的 NPY 数组。训练阶段从该缓存构造 8 个交易日的时序样本；标签标准化和特征预处理不会使用未来信息。特征数组默认支持 mmap 读取，不要求整套数据长期驻留 RAM；manifest 和 hash 用于检查 shape、日期、特征顺序与数据完整性。这样可以避免反复解析原始日频/分钟行情和重复执行高成本特征计算，同时保持数据契约、模型、滚动调度与评估相互分离。
 
 ## 方法
 
