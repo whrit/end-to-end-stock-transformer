@@ -97,7 +97,7 @@ Minute return, absolute-return, and log-volume sequences are summarized in the f
 $$
 P_k =
 \left|
-\operatorname{RFFT}(x_t-\bar{x})_k
+\mathrm{RFFT}(x_t-\bar{x})_k
 \right|^2,
 $$
 

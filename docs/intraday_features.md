@@ -48,7 +48,7 @@ Position \(m\) is structural inactive when \(z_{d,m}\ge\tau_z\), with default \(
 Coverage is computed from the unmodified close grid:
 
 \[
-\operatorname{coverage}_{i,d}=
+\mathrm{coverage}_{i,d}=
 \frac{\#\{m:C_{i,d,m}\text{ is finite}\}}{240}.
 \]
 
@@ -106,9 +106,9 @@ Default minimum observations are 10 paired points for 1m correlations, 4 blocks 
 For non-negative weights \(w_j\), let \(q_j=w_j/\sum_k w_k\). The common concentration summaries are
 
 \[
-\operatorname{HHI}(w)=\sum_jq_j^2,
+\mathrm{HHI}(w)=\sum_jq_j^2,
 \qquad
-\operatorname{Entropy}(w)=
+\mathrm{Entropy}(w)=
 -\frac{\sum_{j:q_j>0}q_j\log q_j}{\log K},
 \]
 
@@ -160,13 +160,13 @@ The base volatility summaries are
 \[
 BV=\frac{\pi}{2}\sum_{m=2}^{M}|r_m||r_{m-1}|,
 \quad
-\operatorname{jump\_share}=\frac{\max(RV-BV,0)}{RV},
+\mathrm{jump\_share}=\frac{\max(RV-BV,0)}{RV},
 \]
 
 \[
-\operatorname{downside\_rv}=\sum_{r_m<0}r_m^2,
+\mathrm{downside\_rv}=\sum_{r_m<0}r_m^2,
 \quad
-\operatorname{RQ}=\frac{M}{3}\sum_mr_m^4.
+\mathrm{RQ}=\frac{M}{3}\sum_mr_m^4.
 \]
 
 Minute-bar Parkinson and Rogers–Satchell quantities are summed across valid bars:
@@ -191,9 +191,9 @@ The family contains volume HHI, normalized volume entropy, volume Gini, amount H
 For positive minute volume and amount, define \(P_m=A_m/V_m\). `vwap_path_absdev` and `minute_vwap_dispersion` are respectively
 
 \[
-\operatorname{Mean}\left|\log(P_m/P_{day})\right|,
+\mathrm{Mean}\left|\log(P_m/P_{day})\right|,
 \qquad
-\operatorname{Std}\left[\log(P_m/P_{day})\right].
+\mathrm{Std}\left[\log(P_m/P_{day})\right].
 \]
 
 ### Price-volume coupling — F041–F052 and F213–F228
@@ -201,9 +201,9 @@ For positive minute volume and amount, define \(P_m=A_m/V_m\). `vwap_path_absdev
 Let \(v_m=\log(1+V_m)\), \(u_m=\log(1+A_m)\), and \(\Delta v_m=v_m-v_{m-1}\). F041–F048 contain contemporaneous correlations between returns/absolute returns and \(v\) or \(\Delta v\), plus one-step lead-lag correlations in both directions. Signed imbalances are
 
 \[
-\frac{\sum_m\operatorname{sign}(r_m)V_m}{\sum_mV_m},
+\frac{\sum_m\mathrm{sign}(r_m)V_m}{\sum_mV_m},
 \qquad
-\frac{\sum_m\operatorname{sign}(r_m)A_m}{\sum_mA_m}.
+\frac{\sum_m\mathrm{sign}(r_m)A_m}{\sum_mA_m}.
 \]
 
 F051–F052 compare mean returns in the top and bottom volume quintiles.
@@ -225,13 +225,13 @@ The fixed windows are `open30` = 1–30, `midmorning` = 31–120, `midafternoon`
 \[
 R(S)=\sum_{m\in S}r_m,
 \quad
-\operatorname{RVShare}(S)=\frac{\sum_{m\in S}r_m^2}{RV},
+\mathrm{RVShare}(S)=\frac{\sum_{m\in S}r_m^2}{RV},
 \]
 
 \[
-\operatorname{VShare}(S)=\frac{\sum_{m\in S}V_m}{\sum_mV_m},
+\mathrm{VShare}(S)=\frac{\sum_{m\in S}V_m}{\sum_mV_m},
 \quad
-\operatorname{Range}(S)=\log\frac{\max_{m\in S}H_m}{\min_{m\in S}L_m}.
+\mathrm{Range}(S)=\log\frac{\max_{m\in S}H_m}{\min_{m\in S}L_m}.
 \]
 
 Structural-inactive rows remain absent, but window boundaries do not move.
@@ -265,20 +265,20 @@ f_k=\frac{k}{M}.
 The five base summaries for each sequence are
 
 \[
-\operatorname{low\_share}=\sum_{k:T_k\ge60}p_k,
+\mathrm{low\_share}=\sum_{k:T_k\ge60}p_k,
 \qquad
-\operatorname{high\_share}=\sum_{k:T_k<15}p_k,
+\mathrm{high\_share}=\sum_{k:T_k<15}p_k,
 \]
 
 \[
-\operatorname{spectral\_entropy}=
+\mathrm{spectral\_entropy}=
 -\frac{\sum_kp_k\log p_k}{\log K},
 \qquad
-\operatorname{centroid}=\sum_kp_kf_k,
+\mathrm{centroid}=\sum_kp_kf_k,
 \]
 
 \[
-\operatorname{dominant\_period}=T_{\arg\max_k P_k},
+\mathrm{dominant\_period}=T_{\arg\max_k P_k},
 \]
 
 where \(K\) is the total number of non-DC real-FFT bins. Zero-power bins contribute zero to the entropy numerator. Constant or near-constant sequences with total non-DC power at or below \(\varepsilon\) return missing spectral summaries.
@@ -311,7 +311,7 @@ and its standardized ordinate
 
 \[
 \tilde y_m=\frac{y_m-\bar y}{s_y},
-\qquad s_y=\operatorname{Std}_{ddof=0}(y).
+\qquad s_y=\mathrm{Std}_{\mathrm{ddof}=0}(y).
 \]
 
 The 2D path is \(\gamma_m=(x_m,\tilde y_m)\). When \(s_y\le\varepsilon\), standardized geometry is undefined.
@@ -356,7 +356,7 @@ For three consecutive standardized path points \(A,B,C\), let \(a,b,c\) be their
 \kappa=\frac{4\Delta}{abc}.
 \]
 
-F096–F098 are mean absolute curvature, its 90th percentile, and curvature energy \(\operatorname{Mean}(\kappa^2)\). Degenerate triples return missing rather than infinity.
+F096–F098 are mean absolute curvature, its 90th percentile, and curvature energy \(\mathrm{Mean}(\kappa^2)\). Degenerate triples return missing rather than infinity.
 
 For `roughness_5m_1m` and `roughness_15m_1m`, the coarse cumulative paths reuse the 1m path's mean and standard deviation, remap coarse time to \([0,1]\), and divide coarse arc length by 1m arc length. F235–F240 instead recompute mean absolute curvature and curvature energy on separately standardized 5m, 15m, and 30m paths.
 

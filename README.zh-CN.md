@@ -97,7 +97,7 @@ MASTER backbone 基于官方实现改造，结构流程为：股票特征序列 
 $$
 P_k =
 \left|
-\operatorname{RFFT}(x_t-\bar{x})_k
+\mathrm{RFFT}(x_t-\bar{x})_k
 \right|^2,
 $$
 

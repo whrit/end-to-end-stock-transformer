@@ -326,6 +326,15 @@ def test_bilingual_language_links_mermaid_latex_and_controls_are_valid():
     assert "股票与指数日频/分钟 OHLCV 和 amount" not in chinese
 
 
+def test_public_markdown_math_avoids_unsupported_github_macros():
+    paths = (
+        [README, README_ZH, RESULTS_README, ROOT / "THIRD_PARTY_NOTICES.md"]
+        + sorted(DOCS.rglob("*.md"))
+    )
+    for path in paths:
+        assert r"\operatorname{" not in path.read_text(encoding="utf-8")
+
+
 def test_public_markdown_has_no_image_links_or_broken_local_links():
     markdown = [README, README_ZH, RESULTS_README] + sorted(DOCS.rglob("*.md"))
     image_pattern = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
