@@ -119,10 +119,8 @@ $$
 因此，即使两只股票具有相近的收盘收益，也可以区分其盘中路径是平滑、曲折、反复还是显著偏离首尾直线。其中一个概括量是弧弦比：
 
 $$
-\mathrm{ArcChordRatio}
-=
-\frac{L_{\mathrm{arc}}}
-{L_{\mathrm{chord}}}.
+\mathrm{ArcChordRatio} =
+\frac{L_{\mathrm{arc}}}{L_{\mathrm{chord}}}.
 $$
 
 相关特征还包括有符号/绝对弦面积、最大/RMS 弦偏离、转向率与转向角、离散曲率、曲率能量和粗糙度。

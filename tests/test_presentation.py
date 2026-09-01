@@ -333,6 +333,8 @@ def test_public_markdown_math_avoids_unsupported_github_macros():
     )
     for path in paths:
         assert r"\operatorname{" not in path.read_text(encoding="utf-8")
+    for path in (README, README_ZH):
+        assert "\n=\n" not in path.read_text(encoding="utf-8")
 
 
 def test_public_markdown_has_no_image_links_or_broken_local_links():

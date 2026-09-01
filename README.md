@@ -119,10 +119,8 @@ $$
 This makes it possible to distinguish smooth, tortuous, repeatedly reversing, or strongly bowed intraday paths even when two stocks have similar close-to-close returns. One summary is the arc-to-chord ratio:
 
 $$
-\mathrm{ArcChordRatio}
-=
-\frac{L_{\mathrm{arc}}}
-{L_{\mathrm{chord}}}.
+\mathrm{ArcChordRatio} =
+\frac{L_{\mathrm{arc}}}{L_{\mathrm{chord}}}.
 $$
 
 Related features include signed and absolute chord area, maximum and RMS chord deviation, turning rate and angle, discrete curvature, curvature energy, and roughness.
