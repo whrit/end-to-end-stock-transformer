@@ -3,9 +3,9 @@ requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "market-guided-stock-alpha"
+name = "end-to-end-stock-transformer"
 version = "0.1.0"
-description = "Market-guided cross-sectional stock alpha research pipeline"
+description = "End-to-end Transformer research for A-share cross-sectional return forecasting"
 readme = "README.md"
 requires-python = ">=3.8"
 license = {file = "LICENSE"}

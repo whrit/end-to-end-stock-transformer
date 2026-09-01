@@ -43,4 +43,4 @@ Install optional dependencies only when needed: `.[lightgbm]`, `.[parquet]`, or 
 - Historical results include complete, partial, and unresolved experiments; status is never imputed.
 - Stage 2 does not contain a strictly matched Alpha158-only control under the same protocol.
 - Historical Stage 2 tables contain independently evaluated seed results, not a recovered raw prediction ensemble.
-- External proprietary portfolio-backtest evidence is not part of the canonical result package.
+- Sanitized portfolio aggregates are included in the public results, while the internal backtest engine, complete execution settings, and underlying proprietary evidence are not part of the repository.

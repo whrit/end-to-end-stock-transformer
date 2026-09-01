@@ -24,15 +24,12 @@ y_{i,t}=
 -1.
 $$"""
 
-STAGE1_ID = (
-    "master_warm_semiannual_d128_b10_h4x1_lr1e-05_p0.5_"
-    "abl-none_xc9dc8fcb65|loss=MSE"
+STAGE1_NAME = "master_d512_mse"
+STAGE2_HEAD_EXECUTIONS = (
+    "20260826_exp102_headscreen_m63_d512_t8_s2_seed42",
+    "20260826_exp104_headscreen_m63_d512_t4_s4_seed42",
 )
-STAGE2_IDS = (
-    "capacity_d256_market63_t4_s2_seed_robustness",
-    "capacity_d512_market63_t4_s2_seed_robustness",
-    "market84_d256_market84_t4_s2_seed_robustness",
-)
+LATE_STAGE2 = ROOT / "results" / "stage2" / "late_regime_results.csv"
 
 
 def _public_markdown() -> str:
@@ -41,64 +38,106 @@ def _public_markdown() -> str:
 
 
 def _selected_prediction_rows():
-    stage1 = pd.read_csv(ROOT / "results/stage1/seed_robustness.csv")
-    stage1_row = stage1.loc[stage1["public_display_name"].eq(STAGE1_ID)].iloc[0]
-    stage2 = pd.read_csv(ROOT / "results/stage2/seed_robustness.csv")
-    stage2_rows = stage2.set_index("public_display_name").loc[list(STAGE2_IDS)]
+    stage1 = pd.read_csv(ROOT / "results/stage1/main_results.csv")
+    stage1_row = stage1.loc[
+        stage1["public_display_name"].eq(STAGE1_NAME)
+        & stage1["target"].eq("Overall")
+    ].iloc[0]
+    stage2 = pd.read_csv(ROOT / "results/stage2/head_sensitivity.csv")
+    stage2_rows = stage2.set_index("historical_execution_id").loc[
+        list(STAGE2_HEAD_EXECUTIONS)
+    ]
     return stage1_row, stage2_rows
 
 
-def test_readme_prediction_table_uses_only_complete_three_seed_statistics():
+def _parameterized_setting(stage: str, row, *, ensemble: bool = False) -> str:
+    market = str(row["market_state"]).replace("Market", "M")
+    seed = "Seeds42/43/44 Ensemble" if ensemble else f"Seed{int(row['seed'])}"
+    return (
+        f"{stage} · {market} · D{int(row['d_model'])} · "
+        f"H{int(row['temporal_heads'])}×{int(row['spatial_heads'])} · {seed}"
+    )
+
+
+def test_readme_prediction_table_has_explicit_seed_and_aggregation_semantics():
     stage1, stage2 = _selected_prediction_rows()
-    assert stage1["completion_status"] == "complete_3seed"
-    assert stage1["aggregation"] == "seed_robustness_mean_std"
-    assert stage1["n_seeds"] == 3
-    assert stage2["completion_status"].eq("complete_3seed").all()
-    assert stage2["aggregation"].eq("seed_robustness_mean_std").all()
+    assert stage1["aggregation"] == "raw_prediction_ensemble"
+    assert stage1["seed"] == "ensemble"
+    assert bool(stage1["historical_raw_prediction_ensemble"])
+    assert (stage1["temporal_heads"], stage1["spatial_heads"]) == (4, 2)
+    assert stage2["seed"].eq(42).all()
+    assert stage2["target"].eq("ALL").all()
+    assert not stage2["historical_raw_prediction_ensemble"].astype(bool).any()
 
-    text = README.read_text(encoding="utf-8")
-    assert "mean ± sample standard deviation across three independently trained seeds" in text
-    assert "Stage 1 · Alpha158 · Market63 · D128" in text
-    assert "Stage 2 · Alpha158 + intraday · Market63 · D256" in text
-    assert "Stage 2 · Alpha158 + intraday · Market63 · D512" in text
-    assert "Stage 2 · Alpha158 + intraday · Market84 · D256" in text
-
-    # Historical raw-score ensemble single points remain documented but are
-    # not rows in the cross-stage prediction table.
-    assert "| MASTER D512 | 3-seed raw-score ensemble |" not in text
-    assert "Stage 1 prediction-level ensemble results" in text
+    english = README.read_text(encoding="utf-8")
+    chinese = README_ZH.read_text(encoding="utf-8")
+    assert "mean ± sample standard deviation across three independently trained seeds" not in english
+    assert "Seed / aggregation" not in english
+    assert "## Selected Results" in english
+    assert "## 部分实验结果" in chinese
+    assert _parameterized_setting("Stage 1", stage1, ensemble=True) in english
+    assert _parameterized_setting("Stage 1", stage1, ensemble=True) in chinese
+    for _, row in stage2.iterrows():
+        setting = _parameterized_setting("Stage 2", row)
+        assert setting in english
+        assert setting in chinese
+    for execution_id in STAGE2_HEAD_EXECUTIONS:
+        assert execution_id not in english
+        assert execution_id not in chinese
 
 
 def test_prediction_table_values_and_bp_to_permille_conversion_are_canonical():
     stage1, stage2 = _selected_prediction_rows()
     texts = (README.read_text(encoding="utf-8"), README_ZH.read_text(encoding="utf-8"))
 
-    stage1_metrics = (
-        "{:.4f} ± {:.4f} | {:.4f} ± {:.4f} | — | — |".format(
-            stage1["IC_mean"], stage1["IC_std"],
-            stage1["RankIC_mean"], stage1["RankIC_std"],
-        )
+    stage1_metrics = "| {:.4f} | {:.4f} | {:.3f} | {:.3f} |".format(
+        stage1["IC"], stage1["RankIC"],
+        stage1["Top5_bp"] / 10.0, stage1["Top10_bp"] / 10.0,
     )
     assert all(stage1_metrics in text for text in texts)
 
     for _, row in stage2.iterrows():
-        # Canonical sources remain in bp; public README presentation is per mille.
         metrics = (
-            "{ic:.4f} ± {ic_std:.4f} | {ric:.4f} ± {ric_std:.4f} | "
-            "{top5:.3f} ± {top5_std:.3f} | {top10:.3f} ± {top10_std:.3f} |"
+            "| {ic:.4f} | {ric:.4f} | {top5:.3f} | {top10:.3f} |"
         ).format(
-            ic=row["IC_mean"], ic_std=row["IC_std"],
-            ric=row["RankIC_mean"], ric_std=row["RankIC_std"],
-            top5=row["Top5_bp_mean"] / 10.0,
-            top5_std=row["Top5_bp_std"] / 10.0,
-            top10=row["Top10_bp_mean"] / 10.0,
-            top10_std=row["Top10_bp_std"] / 10.0,
+            ic=row["IC"], ric=row["RankIC"],
+            top5=row["Top5_bp"] / 10.0,
+            top10=row["Top10_bp"] / 10.0,
         )
         assert all(metrics in text for text in texts)
 
     assert "shown in ‰" in texts[0]
-    assert "单位为 ‰" in texts[1]
+    assert "以 ‰ 展示" in texts[1]
     assert all("1 bp = 0.1‰" not in text for text in texts)
+
+
+def test_later_period_table_preserves_historical_rows_and_stage1_csv_evidence():
+    texts = (README.read_text(encoding="utf-8"), README_ZH.read_text(encoding="utf-8"))
+
+    stage1 = pd.read_csv(ROOT / "results/stage1/main_results.csv")
+    stage1 = stage1.loc[stage1["public_display_name"].eq(STAGE1_NAME)].set_index("target")
+    for target in ("2025H1", "2025H2", "2026H1_partial"):
+        row = stage1.loc[target]
+        rendered = "{:.3f}‰ / {:.3f}‰".format(
+            row["Top5_bp"] / 10.0,
+            row["Top10_bp"] / 10.0,
+        )
+        assert all(rendered in text for text in texts)
+
+    late = pd.read_csv(LATE_STAGE2)
+    for _, group in late.groupby("experiment", sort=False):
+        by_target = group.set_index("target")
+        row = group.iloc[0]
+        label = _parameterized_setting("Stage 2", row)
+        values = (
+            by_target.loc["2025H2", "Top5_bp"] / 10.0,
+            by_target.loc["2025H2", "Top10_bp"] / 10.0,
+            by_target.loc["2026H1_partial", "Top5_bp"] / 10.0,
+            by_target.loc["2026H1_partial", "Top10_bp"] / 10.0,
+        )
+        rendered_values = " | ".join("{:.3f}‰".format(value) for value in values)
+        rendered_row = f"| {label} | {rendered_values} |"
+        assert all(rendered_row in text for text in texts)
 
 
 def test_prediction_top_fractions_are_not_portfolio_long_semantics():
@@ -127,21 +166,38 @@ def test_stage2_ensemble_and_partial_coverage_are_not_misrepresented():
     ].iloc[0]
     assert d128["completion_status"] == "partial_seed_coverage"
     text = README.read_text(encoding="utf-8")
-    assert "Stage 2 D128 has partial seed coverage" in text
+    assert "Stage 2 D128 has partial seed coverage" not in text
     assert "no same-protocol Stage 2 Alpha158-only control is available" in text
+
+
+def test_selected_portfolio_uses_verified_parameterized_setting_names():
+    expected = (
+        "LightGBM · Stage 1 · M63 · Seed42",
+        "Stage 1 · M63 · D128 · H4×1 · Seeds42/43/44 Ensemble",
+        "Stage 2 · M63 · D256 · H4×2 · Seed43",
+        "Stage 2 · M63 · D512 · H4×2 · Seed42",
+    )
+    for text in (
+        README.read_text(encoding="utf-8"),
+        README_ZH.read_text(encoding="utf-8"),
+    ):
+        for setting in expected:
+            assert setting in text
 
 
 def test_readme_positions_the_project_for_ml_and_quant_reviewers():
     text = README.read_text(encoding="utf-8")
     lowered = text.lower()
     required = (
-        "deep-learning research and engineering framework",
-        "multivariate sequential prediction",
-        "cross-sectional stock-return forecasting",
-        "market-guided transformers",
-        "intraday price-volume representations",
-        "dynamic all a-shares",
-        "csi500",
+        "daily and minute-level a-share market data",
+        "five-trading-day excess return relative to the csi500",
+        "complete rolling out-of-sample research pipeline",
+        "dynamic cross-section of a-shares",
+        "8-trading-day sequence",
+        "158 daily alpha158 features",
+        "248 engineered intraday price-volume features",
+        "market conditions are represented separately",
+        "one prediction score for each stock",
         "rankic",
     )
     for phrase in required:
@@ -167,6 +223,24 @@ def test_readme_stage2_tensor_description_matches_both_market_layouts():
     assert r"8 \times D_m" in text
     assert r"D_m \in \{63,84\}" in text
     assert "broadcast across the current cross-section only inside the model forward pass" in text
+
+
+def test_readmes_present_intraday_design_findings_and_open_directions():
+    english = README.read_text(encoding="utf-8")
+    chinese = README_ZH.read_text(encoding="utf-8")
+
+    for text in (english, chinese):
+        assert "docs/intraday_features.md" in text
+        for term in ("F001–F248", "248D", "Spectral", "Geometry", "Multiscale"):
+            assert term in text
+        assert "current model directly consumes raw minute sequences" not in text.lower()
+
+    assert "## Experimental Findings" in english
+    assert "## 实验观察与发现" in chinese
+    assert "## Open Directions" in english
+    assert "## 后续研究方向" in chinese
+    assert "minute data → stock-day 248D representation → 8-day sequence → Transformer" in english
+    assert "分钟行情 → stock-day 248D 表示 → 8 日序列 → Transformer" in chinese
 
 
 def test_readme_data_dates_frequencies_and_feature_origins_are_supported():
@@ -198,8 +272,10 @@ def test_readme_opening_and_main_copy_avoid_defensive_audit_language():
     assert "CSI500 不是股票池" not in chinese
     assert "ddof=1" not in english
     assert "ddof=1" not in chinese
-    assert "investigates whether project-designed minute-level price-volume features" in english
-    assert "重点研究自设计的分钟级量价特征能否" in chinese
+    assert "deep-learning research and engineering framework" not in english
+    assert "investigates whether project-designed minute-level price-volume features" not in english
+    assert "本项目使用 **A 股日频与分钟级行情数据**" in chinese
+    assert "股票数量动态变化的 A 股横截面" in chinese
 
 
 def test_alpha158_attribution_and_no_paper_or_citation_section():
@@ -230,6 +306,8 @@ def test_public_docs_do_not_expose_internal_or_migration_paths():
 def test_bilingual_language_links_mermaid_latex_and_controls_are_valid():
     english = README.read_text(encoding="utf-8")
     chinese = README_ZH.read_text(encoding="utf-8")
+    assert english.startswith("# End-to-End Stock Transformer\n")
+    assert chinese.startswith("# End-to-End Stock Transformer\n")
     assert "**English | [简体中文](README.zh-CN.md)**" in english
     assert "**[English](README.md) | 简体中文**" in chinese
     for path, text in ((README, english), (README_ZH, chinese)):
@@ -242,6 +320,10 @@ def test_bilingual_language_links_mermaid_latex_and_controls_are_valid():
             if unicodedata.category(char) == "Cc" and char not in "\n\r\t"
         ]
         assert unexpected == [], (path, unexpected)
+
+    assert "Daily and minute stock/index OHLCV and amount" not in english
+    assert "Intraday Market Features (192D, exploratory)" not in english
+    assert "股票与指数日频/分钟 OHLCV 和 amount" not in chinese
 
 
 def test_public_markdown_has_no_image_links_or_broken_local_links():

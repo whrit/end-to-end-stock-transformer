@@ -4,6 +4,7 @@ This directory contains the normalized public research results and their sanitiz
 
 - `stage1/` — MASTER baseline, neural/tree baselines, ablations, losses, rolling comparisons, and seed robustness.
 - `stage2/` — intraday-extension capacity, Market84, attention-head, dual-frequency, and seed-robustness results.
+  - `late_regime_results.csv` — selected recovered target-level 2025H2 / 2026H1_partial diagnostics for the Stage 2 settings shown in the README.
 - `portfolio/` — selected portfolio evaluation aggregates.
 - `metadata/` — historical experiment and result-source registries.
 - `provenance/` — sanitized manifests, hashes, and recovery evidence.

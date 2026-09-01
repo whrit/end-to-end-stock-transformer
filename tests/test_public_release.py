@@ -42,7 +42,7 @@ def test_license_and_upstream_notice_are_complete():
     license_text = (ROOT / "LICENSE").read_text(encoding="utf-8")
     notice = (ROOT / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
     assert license_text.startswith("MIT License")
-    assert "market-guided-stock-alpha contributors" in license_text
+    assert "End-to-End Stock Transformer contributors" in license_text
     assert "Copyright (c) 2025 Data Management Technology and AI" in notice
     assert "Exact historical upstream commit" in notice
     assert "src/market_guided_stock_alpha/modeling/master.py" in notice
@@ -95,9 +95,12 @@ def test_gitignore_excludes_local_material_without_hiding_results():
 
 def test_pyproject_declares_public_readme_license_and_python38_floor():
     text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
-    assert 'name = "market-guided-stock-alpha"' in text
+    assert 'name = "end-to-end-stock-transformer"' in text
+    assert 'description = "End-to-end Transformer research for A-share cross-sectional return forecasting"' in text
+    assert 'version = "0.1.0"' in text
     assert 'readme = "README.md"' in text
     assert 'requires-python = ">=3.8"' in text
     assert 'license = {file = "LICENSE"}' in text
     assert "matplotlib" not in text
     assert "presentation" not in text
+    assert (ROOT / "src/market_guided_stock_alpha").is_dir()
