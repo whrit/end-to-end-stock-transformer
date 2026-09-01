@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "upstream_repository": "https://github.com/SJTU-DMTai/MASTER",
+  "paper": "MASTER: Market-Guided Stock Transformer for Stock Price Forecasting, AAAI 2024",
+  "license": "MIT",
+  "upstream_copyright": "Copyright (c) 2025 Data Management Technology and AI",
+  "exact_historical_commit_recorded": false,
+  "note": "Adapted from the official SJTU-DMTai/MASTER implementation. Exact historical upstream commit was not recorded.",
+  "deleted_migration_snapshot_hashes": [
+    {
+      "descriptor": "historical upstream LICENSE",
+      "size_bytes": 1090,
+      "sha256": "092708495d13ce475c76f1a25b52f3aa15ae0bae490a245eb2378d0d543ab736"
+    },
+    {
+      "descriptor": "historical adapted master.py",
+      "size_bytes": 8141,
+      "sha256": "e5e798952c9636c8c43fc91cff51a6dbbebc009b99d16a1ae090be32d0744fe4"
+    },
+    {
+      "descriptor": "historical adapted base_model.py",
+      "size_bytes": 7734,
+      "sha256": "116322431b83194234390a5929cd98883afb8fac2b1eaffb3d01556b9f5d691a"
+    },
+    {
+      "descriptor": "historical upstream pytorch_master_ts.py reference",
+      "size_bytes": 16729,
+      "sha256": "2728b737c3bef64beab3d125802a232edc01624d22383ae50f378ffd72d0f97a"
+    },
+    {
+      "descriptor": "historical upstream main_official.py reference",
+      "size_bytes": 3294,
+      "sha256": "40225b71e357c2a4618dce3fbfc9f5c4c531522f3c4d92234c29d8913712784e"
+    },
+    {
+      "descriptor": "historical upstream origin note",
+      "size_bytes": 603,
+      "sha256": "ddbf0d8e1e739215c1024ecd601b7a6a7e453f069d0b4e06b89d8cf1ac361466"
+    }
+  ]
+}

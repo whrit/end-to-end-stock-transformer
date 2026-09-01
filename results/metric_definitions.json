@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "canonical_columns": {
+    "IC": "Daily cross-sectional Pearson correlation between score and raw label; Overall is valid-day weighted.",
+    "RankIC": "Daily cross-sectional average-tie rank correlation between score and raw label; Overall is valid-day weighted.",
+    "Top5_bp": "Mean raw label among the top 5% by score, converted once from decimal return by multiplying by 10,000.",
+    "Top10_bp": "Mean raw label among the top 10% by score, converted once from decimal return by multiplying by 10,000.",
+    "MSE": "Pooled squared error on the daily cross-sectionally normalized label.",
+    "R2": "Pooled R-squared on the daily cross-sectionally normalized label."
+  },
+  "selection_and_filtering": {
+    "top_fraction": "max(1, ceil(valid_count * fraction)); stable descending score order",
+    "minimum_valid_security_count": 2,
+    "non_finite": "Excluded before daily metric computation; days below the minimum are not valid metric days."
+  },
+  "ensemble_semantics_evidence": {
+    "source_proven": "A recovered averaging implementation directly shows equal-weight raw prediction averaging followed by evaluator execution.",
+    "user_confirmed": "The project author confirmed the same historical prediction-level ensemble contract; no missing script or hash is fabricated.",
+    "empty": "Not a historical prediction ensemble, or no ensemble claim is made."
+  },
+  "project03": {
+    "top_source_unit": "Recovered specialized CSV columns ending in _bp are already basis points and are not converted again.",
+    "overall": "Recovered completed tables use valid-day means for IC/RankIC/Top returns and pooled observations for MSE/R2.",
+    "evidence": [
+      "project03_github_handoff_20260831/project03_github_handoff_20260831/experiment_results/master_ppt_completed_metrics_20260828.csv",
+      "project03_github_handoff_20260831/project03_github_handoff_20260831/experiment_results/scripts/collect_master_ppt_metrics_20260828.py"
+    ]
+  },
+  "project04": {
+    "top_source_unit": "Evaluator summaries store raw decimal returns; canonical bp equals decimal return multiplied by 10,000 exactly once.",
+    "overall": "Reconstructed from materialized target evaluator summaries: valid-day weighting for IC/RankIC/Top and pooled SSE/label moments for MSE/R2.",
+    "evidence": "Canonical result_source descriptors plus results/provenance/source_inventory_summary.json (229 evaluation summaries; aggregate manifest hash retained)."
+  },
+  "canonical_evaluator_evidence": [
+    "src/market_guided_stock_alpha/evaluation/metrics.py",
+    "src/market_guided_stock_alpha/evaluation/overall.py"
+  ]
+}

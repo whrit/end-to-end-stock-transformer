@@ -1,0 +1,43 @@
+# Python caches and test output
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+.codex_test_runtime/
+
+# Packaging
+build/
+dist/
+*.egg-info/
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Runtime products
+*.log
+*.pt
+*.pth
+*.ckpt
+outputs/
+cache/
+logs/
+runs/
+data/
+
+# Local recovery material and archives
+*.tar
+*.tar.gz
+*.zip
+_result_recovery/
+project03_github_handoff_*/
+project04_results_export_*/
+/backtesting/

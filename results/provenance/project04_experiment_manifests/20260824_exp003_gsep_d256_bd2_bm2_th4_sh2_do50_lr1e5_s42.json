@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "namespace": "20260824_exp003_gsep_d256_bd2_bm2_th4_sh2_do50_lr1e5_s42",
+  "experiment_config_sha256": "91c8b115c22fcc219f3b919f700cb26c51d30989d33ec52f5d1d903591b93851",
+  "dataset_config_sha256": "e551a917352ac201ce2db6eccebbb45b921a5af9653dd0ea4a0a8b39d66cfd6a",
+  "feature_layout_sha256": "5422f42d6b2de4a10248519cb3c4ec577885316a2840b8860b74752d7d05251e",
+  "model_spec_sha256": "c67db1a64979597a2afc747938626e2fc3065d99335c9d23deaa9bd3aa45f7b7",
+  "seed": 42,
+  "rolling_experiment_config_sha256": "1261f504c2dac14930452daf65624bd4c55c1a25c2709db66e85f2c9a6e7e7fa"
+}

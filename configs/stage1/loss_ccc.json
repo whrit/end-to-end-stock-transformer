@@ -1,0 +1,6 @@
+{
+  "schema_version": 1, "experiment_name": "loss_ccc", "research_position": "stage1", "universe": "dynamic_all_a_shares", "label_contract": {"name": "csi500_relative_excess_return_t1_t6", "benchmark": "000905.SH", "holding_period_trading_days": 5, "dependency_offset_trading_days": 6}, "feature_layout": "stage1_market63",
+  "model": {"family": "master", "d_model": 128, "temporal_heads": 4, "spatial_heads": 1, "dropout": 0.5, "beta": 10.0, "ablation": "none"},
+  "training": {"epochs": 40, "optimizer": {"learning_rate": 0.00001, "weight_decay": 0.0, "gradient_clip_value": 3.0}, "loss": {"name": "ccc", "epsilon": 1e-8}, "early_stopping": {"enabled": true, "patience": 8, "minimum_epochs": 10}, "minimum_valid_labels": 2, "checkpoint_every": 1, "primary_metric": "mean_rank_ic"},
+  "rolling": {"frequency": "semiannual", "train_start": "2016-01-01", "test_start": "2023-01-01", "test_end": "2026-04-27"}, "initialization": "warm", "seeds": [42, 43, 44], "data": {"calendar": "data/calendar.csv", "membership": "data/membership.parquet", "label": "data/derived/relative_excess_return_5d.pkl", "label_column": "relative_excess_return_5d", "alpha158": "data/derived/alpha158", "market": "data/derived/market63"}, "output_root": "runs"
+}

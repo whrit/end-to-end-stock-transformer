@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {
+      "source_file": "project03_github_handoff_20260831/project03_github_handoff_20260831/experiment_results/master_baseline_unified_metrics_20260828.csv",
+      "size_bytes": 3653,
+      "sha256": "7b42719ec25b8814cd006470212e83f9f5867d49595fc7a4dce8ef05f9685270",
+      "canonical_role": "primary_results"
+    },
+    {
+      "source_file": "project03_github_handoff_20260831/project03_github_handoff_20260831/experiment_results/master_ppt_completed_metrics_20260828.csv",
+      "size_bytes": 11575,
+      "sha256": "2f0d9755a26f04b45fd0163fb9799fe3da69bc1478862e846c8adc63b6effd40",
+      "canonical_role": "primary_results"
+    },
+    {
+      "source_file": "project03_github_handoff_20260831/project03_github_handoff_20260831/experiment_results/project03_existing_recovered_results_v2_20260831.csv",
+      "size_bytes": 1494178,
+      "sha256": "dfe6650d31ddd8b167b1688ca7cab27f9bc694f6e259c6b8d3349bb421568615",
+      "canonical_role": "primary_results"
+    },
+    {
+      "source_file": "project03_github_handoff_20260831/project03_github_handoff_20260831/experiment_results/project03_seed_robustness_v2_20260831.csv",
+      "size_bytes": 16771,
+      "sha256": "6abbe7aba50fc30fa7b4e06c85e4237364dd2cea2ba951ad4f55241e30b86a80",
+      "canonical_role": "primary_results"
+    },
+    {
+      "source_file": "project03_github_handoff_20260831/project03_github_handoff_20260831/experiment_results/scripts/collect_master_ppt_metrics_20260828.py",
+      "size_bytes": 8316,
+      "sha256": "c4f8cc8d4a021536f6c5e705d3088705a664fc539b626ccc06aa4ac4e3bb5ee3",
+      "canonical_role": "audit"
+    }
+  ]
+}

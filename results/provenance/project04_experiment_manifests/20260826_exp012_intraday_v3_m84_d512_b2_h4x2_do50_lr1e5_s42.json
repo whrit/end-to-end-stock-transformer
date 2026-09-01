@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "namespace": "20260826_exp012_intraday_v3_m84_d512_b2_h4x2_do50_lr1e5_s42",
+  "experiment_config_sha256": "41bc12548727f026d7cf7c4c9d306239e28c280585d130184280f2d73822b179",
+  "dataset_config_sha256": "c6cc784bdf088a798b17195be4122262d37a29a0787ecdf514f5da5e59d50367",
+  "feature_layout_sha256": "788c46d4a2559a38ce010567f6ca54931beec1d4f2db10a1b3bee37ab0c05469",
+  "model_spec_sha256": "fcea64d25bc06e3f7f66eee6acc9c4198cf307aa92c2739c78d93b51adfaea1d",
+  "seed": 42,
+  "rolling_experiment_config_sha256": "733870d596c6c31d77921d8e7971b1f614418dc5e0de57f4acb0734d0540f0d6"
+}
