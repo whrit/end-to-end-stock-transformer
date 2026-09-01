@@ -6,39 +6,39 @@ This project uses **daily and minute-level A-share market data** with Transforme
 
 At each prediction date, the model processes a dynamic cross-section of A-shares. Each stock is represented by an **8-trading-day sequence**, combining **158 daily Alpha158 features** with up to **248 engineered intraday price-volume features**, while market conditions are represented separately by daily index-based features. The Transformer uses market-conditioned feature gating, temporal attention, and cross-sectional stock interaction to produce one prediction score for each stock.
 
-**Data coverage:** market history from 2016 onward; rolling OOS prediction and evaluation from 2023 through 2026-04-27, with 2026H1 partial.
+**Data coverage:** market history from 2016 onward; rolling OOS prediction and evaluation from 2023 through 2026-04-27, with 2026H1 representing a partial period.
 
 ## Highlights
 
-- Transformer-based sequence modeling with temporal attention, cross-sectional entity interaction, and market-state-conditioned feature gating.
+- Transformer-based sequence modeling with temporal attention, cross-sectional stock interaction, and market-state-conditioned feature gating.
 - Multi-source, multi-frequency feature fusion combines the standard Alpha158 feature set with project-designed Intraday Price-Volume Features (248D).
-- An adapted MASTER backbone is compared with GRU and Vanilla Transformer neural baselines and a LightGBM tabular baseline under one temporal protocol.
+- An adapted MASTER backbone is compared with GRU and Vanilla Transformer neural baselines and a LightGBM tabular baseline under the same temporal protocol.
 - Feature construction, model training, rolling scheduling, checkpoint/resume, and evaluation remain cleanly separated.
-- Financial research uses dynamic All-A membership and a `t+1 → t+6` five-trading-day CSI500-relative target with leakage-aware purge.
+- The experiments use a date-varying A-share universe and a `t+1 → t+6` five-trading-day CSI500-relative target with leakage-aware purging.
 - IC, RankIC, Top 5% / Top 10% returns, ablations, sensitivity studies, multi-seed robustness, and prediction-level ensembling are reported explicitly.
 
 ## Research Pipeline
 
 ```mermaid
 flowchart TD
-    A["Raw Market Data<br/>Stock / index data<br/>Daily · minute<br/>Dynamic All-A · trading calendar"]
+    A["Raw Market Data<br/>Stock and index data<br/>Daily and minute-level<br/>Date-varying A-share universe<br/>Trading calendar"]
 
-    B["Features & Target<br/>Alpha158 · Intraday 248D<br/>Market63/84<br/>CSI500-relative return<br/>Next 5 trading days"]
+    B["Features and Target<br/>Alpha158 · Intraday 248D<br/>Market63/84<br/>CSI500-relative<br/>5-trading-day return"]
 
-    C["Precomputed Feature Cache<br/>NPY / mmap<br/>manifest · hash"]
+    C["Precomputed Data Cache<br/>Features: NumPy / mmap<br/>Labels: pickle<br/>manifest · hash"]
 
-    D["8-Day Sequences<br/>cross-sectional normalization<br/>t+6 purge"]
+    D["8-Day Sequences<br/>Cross-sectional<br/>normalization<br/>t+6 purge"]
 
-    E["Transformer Modeling<br/>market-state gating<br/>temporal attention<br/>cross-sectional attention"]
+    E["Transformer Modeling<br/>Market-state gating<br/>Temporal attention<br/>Cross-sectional attention"]
 
-    F["Rolling OOS Training<br/>semiannual · warm start<br/>multi-seed"]
+    F["Rolling OOS Training<br/>Semiannual · warm start<br/>Multi-seed"]
 
     G["Evaluation<br/>IC · RankIC<br/>Top 5% · Top 10%<br/>MSE · R²"]
 
     A --> B --> C --> D --> E --> F --> G
 ```
 
-Alpha158, Intraday 248D, Market63/84, and labels are computed once and stored as precomputed NPY arrays for repeated use across rolling windows. Training constructs eight-trading-day samples from this cache; label normalization and feature preprocessing are fitted without future leakage. Feature arrays support mmap reads by default, so the full dataset does not need to remain in RAM, while manifests and hashes validate shapes, dates, feature order, and data integrity. This avoids repeatedly parsing raw daily/minute data and recomputing expensive features while keeping data contracts, modeling, rolling scheduling, and evaluation separate.
+Alpha158, the 248D intraday features, Market63/84, and labels are computed once and cached for rolling training. Feature artifacts are stored as NumPy arrays with mmap support, while labels are stored separately as a pickle artifact. Training constructs eight-trading-day samples from these cached outputs, while label normalization and feature preprocessing are fitted only on the corresponding training data to prevent future leakage. Manifests and hashes record dimensions, dates, feature order, provenance, and data integrity. This avoids repeatedly parsing raw daily/minute data and recomputing expensive features while keeping data processing, modeling, rolling scheduling, and evaluation separate.
 
 ## Method
 
@@ -71,7 +71,7 @@ To keep this comparison focused, I kept the model backbone and rolling setup bro
 
 Before defining individual features, I considered which parts of intraday trading behavior I wanted to capture: distributional shape, volatility and liquidity, price-volume interaction, time-of-day and cross-session structure, frequency composition, geometric path shape, event timing, and behavior across scales. I then organized these ideas into the 11 families below and implemented the finalized F001–F248 representation.
 
-The underlying mathematical tools—including standard statistics, FFTs, entropy, and curvature—are not original to this project. My work here is the feature selection and organization, adaptation to intraday market data, session/multiscale construction, spectral and path-shape representations, and their complete implementation as one fixed 248D system.
+The underlying mathematical tools—including standard statistics, FFTs, entropy, and curvature—are not original to this project. I selected and organized the features, adapted them to intraday market data, constructed the session-aware and multiscale representations, and implemented the spectral and path-shape components as one fixed 248D system.
 
 | Feature family | Count |
 |---|---:|
@@ -133,13 +133,13 @@ Statistics, volatility concentration, and path shape are recomputed at 1m, 5m, 1
 
 **Full F001–F248 definitions, formulas, interpretations, and implementation mapping:** [`docs/intraday_features.md`](docs/intraday_features.md)
 
-Design inspiration: in designing the frequency- and path-based representations, I drew on literature about frequency decomposition and functional/high-frequency market representations; the finalized feature definitions and implementation are specific to this project.
+Design inspiration: when developing the frequency- and path-based representations, I drew on literature on frequency decomposition, functional data, and high-frequency market representations; the final feature definitions and implementation are specific to this project.
 
 Stage 2 therefore uses `Alpha158 (158D) + Intraday Price-Volume Features (248D) = 406D` as the stock representation. The current path is minute data → stock-day 248D representation → 8-day sequence → Transformer; it does not directly feed `8 × 240` raw minute bars into the Transformer.
 
 At each prediction date, the Stage 2 model receives `N` securities as $X_{\mathrm{stock}} \in \mathbb{R}^{N \times 8 \times 406}$, where 8 is the trading-day lookback and 406 is the fused stock representation. Market state remains a separate date-level tensor, $X_{\mathrm{market}} \in \mathbb{R}^{8 \times D_m}$ with $D_m \in \{63,84\}$, and is broadcast across the current cross-section only inside the model forward pass.
 
-Formal Stage 2 experiments use both Market63 (63 dimensions) and Market84 (84 dimensions). Other studies cover hidden capacity, temporal/cross-sectional attention heads, and exploratory daily/intraday market gating with Intraday Market Features (192D). Cross-stage numbers are **not** a strictly matched feature ablation: no same-protocol Stage 2 Alpha158-only control is available.
+Formal Stage 2 experiments use both Market63 (63 dimensions) and Market84 (84 dimensions). Other studies cover hidden capacity, temporal/cross-sectional attention heads, and exploratory daily/intraday market gating with Intraday Market Features (192D). **Stage 1 and Stage 2 do not form a strictly matched feature ablation**, because no same-protocol Stage 2 Alpha158-only control is available.
 
 ## Experimental Findings
 
@@ -149,11 +149,11 @@ Detailed experiment tables are available in the [experiment summary](docs/experi
 
 - **Loss functions emphasized different objectives.** CCC produced strong overall correlation and top-ranked-return performance in the tested D128 setting, while ListFold achieved the highest RankIC but weaker Top 5% / Top 10% returns. Ranking quality and extreme top-bucket returns were therefore not identical optimization objectives.
 
-- **Standard learning-rate and dropout tuning was relatively stable in Stage 1.** Within the tested daily Market63 setting, learning-rate and dropout variants did not produce a stable large improvement, suggesting that performance was not dominated by fine tuning of these two parameters.
+- **Stage 1 was relatively insensitive to learning-rate and dropout changes within the tested ranges.** Within the tested daily Market63 setting, varying these two hyperparameters did not produce a consistent large improvement, suggesting that they were not the main drivers of performance.
 
-- **Warm start was not a dominant source of prediction quality.** The tested warm/cold rolling comparisons showed broadly similar overall behavior rather than a uniform large advantage from initialization, suggesting that refitting on each rolling training window carries much of the adaptation burden.
+- **Warm start was not a dominant source of prediction quality.** The tested warm/cold rolling comparisons showed broadly similar overall behavior, with no consistent large advantage from warm initialization, suggesting that refitting on each rolling training window carries much of the adaptation burden.
 
-- **Rolling frequency interacted with model capacity rather than showing one universal optimum.** Quarterly rolling improved some D128 metrics relative to semiannual rolling, whereas monthly rolling did not show a compelling advantage. Across larger-capacity settings, the same trend was not consistently reproduced, so the capacity × rolling-frequency interaction remains under-explored.
+- **The effect of rolling frequency appeared to depend on model capacity rather than pointing to a single universal optimum.** Quarterly rolling improved some D128 metrics relative to semiannual rolling, whereas monthly rolling did not show a compelling advantage. Across larger-capacity settings, the same trend was not consistently reproduced, so the capacity × rolling-frequency relationship remains under-explored.
 
 - **More market-state dimensions did not automatically improve prediction.** Market84 produced small and mixed changes relative to Market63 in the tested Stage 2 settings, so simply enlarging the market-state vector was not enough to obtain a consistent gain.
 
@@ -205,13 +205,13 @@ The long portfolio follows the historical backtest system's portfolio definition
 
 - **Direct minute-sequence modeling.** The current Stage 2 pipeline compresses each stock-day into a 248D representation before the eight-day Transformer. A natural extension is to introduce a dedicated intraday encoder that directly consumes minute-level stock sequences and learns the daily representation jointly with the downstream return-prediction model.
 
-- **Intraday market-state modeling.** The exploratory [dual-frequency experiments](docs/dual_frequency.md) indicate that richer daily + intraday market guidance is worth further study. Learning rate, dropout/regularization, capacity, and routing/gating structure were not exhaustively tuned within the project scope.
+- **Intraday market-state modeling.** The exploratory [dual-frequency experiments](docs/dual_frequency.md) indicate that richer joint daily and intraday market guidance is worth further study. Learning rate, dropout/regularization, capacity, and routing/gating structure were not exhaustively tuned within the project scope.
 
 - **Capacity × rolling-frequency interaction.** The different trends observed across smaller and larger models motivate a systematic study of whether shorter retraining intervals help only certain capacity regimes or under particular market conditions.
 
 ## Experimental Design
 
-- Dynamic All A-share membership by date.
+- Date-varying A-share universe.
 - Eight-trading-day stock and market lookback.
 - Data history: 2016 onward.
 - Rolling OOS prediction and evaluation: 2023 through 2026-04-27 (partial 2026H1).
