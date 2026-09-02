@@ -1,4 +1,4 @@
-"""Transparent JSON-to-canonical rolling wiring; no legacy execution IDs."""
+"""JSON configuration validation and rolling runtime wiring."""
 
 from dataclasses import replace
 import json
@@ -106,20 +106,8 @@ def _lightgbm_training(document: Mapping[str, Any]) -> LightGBMTrainingConfig:
     )
 
 
-def _walk_keys(value: Any):
-    if isinstance(value, Mapping):
-        for key, item in value.items():
-            yield str(key)
-            for nested in _walk_keys(item):
-                yield nested
-    elif isinstance(value, (list, tuple)):
-        for item in value:
-            for nested in _walk_keys(item):
-                yield nested
-
-
 def validate_experiment_config(document: Mapping[str, Any]) -> Dict[str, Any]:
-    """Validate one public config without opening user data or output paths."""
+    """Validate one experiment config without opening data or output paths."""
     config = dict(document)
     required = {
         "schema_version",
@@ -138,13 +126,13 @@ def validate_experiment_config(document: Mapping[str, Any]) -> Dict[str, Any]:
     }
     missing = required.difference(config)
     if missing:
-        raise ValueError("public config fields missing: {}".format(sorted(missing)))
+        raise ValueError("experiment config fields missing: {}".format(sorted(missing)))
     if config["schema_version"] != 1:
-        raise ValueError("unsupported public config schema")
+        raise ValueError("unsupported experiment config schema")
     if config["research_position"] not in ("stage1", "stage2", "secondary", "exploratory"):
         raise ValueError("invalid research_position")
     if config["universe"] != "dynamic_all_a_shares":
-        raise ValueError("public universe must be dynamic_all_a_shares")
+        raise ValueError("universe must be dynamic_all_a_shares")
     expected_label = {
         "name": "csi500_relative_excess_return_t1_t6",
         "benchmark": "000905.SH",
@@ -152,19 +140,7 @@ def validate_experiment_config(document: Mapping[str, Any]) -> Dict[str, Any]:
         "dependency_offset_trading_days": 6,
     }
     if config["label_contract"] != expected_label:
-        raise ValueError("public label contract must be the canonical CSI500-relative target")
-    forbidden = {
-        "execution_id",
-        "ensemble_method",
-        "beta_csi300",
-        "beta_csi800",
-        "provided_tag_v1",
-        "server_namespace",
-        "ppu",
-    }
-    present = forbidden.intersection(set(_walk_keys(config)))
-    if present:
-        raise ValueError("forbidden historical config keys: {}".format(sorted(present)))
+        raise ValueError("label contract must be the canonical CSI500-relative target")
     layout = _layout(str(config["feature_layout"]))
     rolling = dict(config["rolling"])
     if rolling.get("frequency") not in ("semiannual", "quarterly", "monthly"):
@@ -175,7 +151,7 @@ def validate_experiment_config(document: Mapping[str, Any]) -> Dict[str, Any]:
     initialization = InitializationMode(str(config["initialization"]))
     seeds = tuple(config["seeds"])
     if not seeds or len(seeds) != len(set(seeds)) or any(type(value) is not int for value in seeds):
-        raise ValueError("public config seeds must be unique integers")
+        raise ValueError("config seeds must be unique integers")
     data = dict(config["data"])
     required_data = {"calendar", "membership", "label", "label_column", "alpha158", "market"}
     if "intraday_price_volume" in layout.stock_families:
@@ -184,18 +160,12 @@ def validate_experiment_config(document: Mapping[str, Any]) -> Dict[str, Any]:
         required_data.add("intraday_market")
     missing_data = required_data.difference(data)
     if missing_data:
-        raise ValueError("public data locations missing: {}".format(sorted(missing_data)))
-    for value in list(data.values()) + [config["output_root"]]:
-        text = str(value)
-        if Path(text).is_absolute() or (len(text) >= 3 and text[1:3] in (":\\", ":/")):
-            raise ValueError("public config paths must be relative")
-        if "/mnt/" in text.replace("\\", "/"):
-            raise ValueError("public config contains a company absolute path")
+        raise ValueError("data locations missing: {}".format(sorted(missing_data)))
     model_document = dict(config["model"])
     family = model_document.get("family")
     if family == "lightgbm":
         if initialization != InitializationMode.COLD:
-            raise ValueError("formal LightGBM config must be cold-start")
+            raise ValueError("LightGBM config must be cold-start")
         lightgbm_training = _lightgbm_training(config)
         model = None
         training = lightgbm_training

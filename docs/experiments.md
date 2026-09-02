@@ -64,4 +64,4 @@ Market84 made small mixed changes at D256 and was lower on the displayed D512 me
 
 The five complete D512 settings are `T2×S2`, `T4×S1`, `T4×S2`, `T4×S4`, and `T8×S2`. RankIC and Top 5% return do not select the same setting, reinforcing the need to report multiple evaluation views rather than a single tuned number.
 
-Selected 2025H2 / 2026H1_partial diagnostics for the README settings are available in [`late_regime_results.csv`](../results/stage2/late_regime_results.csv). These target-level Stage 2 metrics were recovered from historical evaluation summaries and normalized into the public result table; the original raw target-evaluation artifacts are not included in this repository.
+Selected 2025H2 / 2026H1_partial diagnostics for the README settings are available in [`late_regime_results.csv`](../results/stage2/late_regime_results.csv). The table retains the reported target-level Stage 2 metrics; the original raw target-evaluation artifacts are not included in this repository.

@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 import pandas as pd
@@ -31,7 +32,9 @@ from market_guided_stock_alpha.rolling import (
     RollingRunner,
     RollingTarget,
     load_experiment_config,
+    validate_experiment_config,
 )
+import market_guided_stock_alpha.rolling.configuration as rolling_configuration
 from market_guided_stock_alpha.training import LightGBMTrainingConfig
 
 
@@ -45,6 +48,92 @@ class ConfigAndPackagingTest(unittest.TestCase):
                 document, _validated = load_experiment_config(path)
                 self.assertNotIn(document["experiment_name"], names)
                 names.add(document["experiment_name"])
+
+    def test_shipped_config_paths_resolve_to_repository_data_and_runs(self):
+        data_root = (ROOT / "data").resolve()
+        expected_manifest = (
+            data_root / "derived" / "relative_excess_return_5d.manifest.json"
+        )
+        for path in sorted((ROOT / "configs").rglob("*.json")):
+            with self.subTest(path=str(path.relative_to(ROOT))):
+                document, _validated = load_experiment_config(path)
+                data = dict(document["data"])
+                self.assertIn("label_manifest", data)
+                for name, value in data.items():
+                    if name == "label_column":
+                        continue
+                    relative = Path(str(value))
+                    self.assertFalse(relative.is_absolute())
+                    resolved = (path.parent / relative).resolve()
+                    self.assertTrue(
+                        resolved == data_root or data_root in resolved.parents
+                    )
+                self.assertEqual(
+                    (path.parent / data["label_manifest"]).resolve(),
+                    expected_manifest,
+                )
+                self.assertEqual(
+                    (path.parent / document["output_root"]).resolve(),
+                    (ROOT / "runs").resolve(),
+                )
+
+    def test_user_config_accepts_absolute_data_and_output_paths(self):
+        path = ROOT / "configs" / "stage1" / "master_d128_market63.json"
+        document, _validated = load_experiment_config(path)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            data = dict(document["data"])
+            for name in data:
+                if name != "label_column":
+                    data[name] = str(root / name)
+            document["data"] = data
+            document["output_root"] = str(root / "runs")
+            validated = validate_experiment_config(document)
+        self.assertEqual(validated["layout"], FeatureLayout.stage1())
+
+    def test_label_manifest_is_wired_into_derived_label_reader(self):
+        path = ROOT / "configs" / "stage1" / "master_d128_market63.json"
+        with mock.patch.object(
+            rolling_configuration, "read_table", return_value=mock.sentinel.table
+        ), mock.patch.object(
+            rolling_configuration,
+            "TradingCalendar",
+            return_value=mock.sentinel.calendar,
+        ), mock.patch.object(
+            rolling_configuration,
+            "DerivedLabelReader",
+            return_value=mock.sentinel.label_reader,
+        ) as label_reader, mock.patch.object(
+            rolling_configuration,
+            "read_alpha158_artifact",
+            return_value=mock.sentinel.alpha158,
+        ), mock.patch.object(
+            rolling_configuration,
+            "read_market63_artifact",
+            return_value=mock.sentinel.market,
+        ), mock.patch.object(
+            rolling_configuration, "generate_rolling_targets", return_value=()
+        ), mock.patch.object(
+            rolling_configuration, "RollingRunner"
+        ) as runner:
+            runner.return_value.run.return_value = {}
+            rolling_configuration.run_from_json_config(path)
+
+        label_path, column, manifest_path = label_reader.call_args.args
+        self.assertEqual(
+            label_path.resolve(),
+            (ROOT / "data" / "derived" / "relative_excess_return_5d.pkl").resolve(),
+        )
+        self.assertEqual(column, DEFAULT_VALUE_COLUMN)
+        self.assertEqual(
+            manifest_path.resolve(),
+            (
+                ROOT
+                / "data"
+                / "derived"
+                / "relative_excess_return_5d.manifest.json"
+            ).resolve(),
+        )
 
     def test_python_38_syntax_and_packaging_metadata(self):
         import ast

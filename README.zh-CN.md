@@ -233,16 +233,16 @@ Stage 2 最终使用 `Alpha158 (158D) + Intraday Price-Volume Features (248D) = 
 src/        核心 Python 包
 configs/    Stage 1、Stage 2、次要与探索性实验 config
 scripts/    公开特征/标签 builder 与 rolling 入口
-tests/      公开版单元、集成、契约与展示测试
-results/    标准化结果表、历史 metadata registry、指标定义与结果溯源
-docs/       数据、复现、实验与结果溯源文档
+tests/      单元、集成与契约测试
+results/    Stage 1、Stage 2 与组合评估的标准化结果表
+docs/       数据、特征、实验、组合评估与复现文档
 ```
 
 ## 快速开始
 
 ```bash
-pip install -e .
-# 可选：pip install -e ".[parquet,test]"
+pip install -e ".[parquet,test]"
+# 如需运行 LightGBM 实验：pip install -e ".[lightgbm]"
 
 python scripts/build_relative_excess_label.py \
   --stock-daily data/daily_stock.parquet \
@@ -262,6 +262,7 @@ python scripts/build_intraday_features.py intraday_price_volume \
   --input data/minute_stock.parquet \
   --output data/derived/intraday_price_volume
 
+# 按 docs/data_contract.md 的 membership schema 准备 data/membership.parquet。
 python scripts/run_rolling.py configs/stage2/intraday_price_volume_master_d512_market63.json
 pytest
 ```
@@ -278,7 +279,7 @@ pytest
 
 MASTER backbone 基于 **Li et al., “MASTER: Market-Guided Stock Transformer for Stock Price Forecasting,” AAAI 2024** 的[官方实现](https://github.com/SJTU-DMTai/MASTER)进行适配，论文见[此处](https://ojs.aaai.org/index.php/AAAI/article/view/27767)。历史实验所使用的确切 upstream commit 未被记录。标准 Alpha158 实现则是对 Microsoft Qlib `Alpha158DL` 定义的 pandas/NumPy 适配。
 
-在此基础上，本项目主要完成了滚动 OOS 训练与评估框架、防未来信息泄漏的标签与数据流程、GRU / Vanilla Transformer / LightGBM 基线集成、消融与 loss / 参数实验体系、248 维分钟级量价特征、Market84 与分钟级市场状态扩展，以及 multi-seed 评估和结果溯源。第三方版权与许可信息见[第三方声明](THIRD_PARTY_NOTICES.md)。
+在此基础上，本项目主要完成了滚动 OOS 训练与评估框架、防未来信息泄漏的标签与数据流程、GRU / Vanilla Transformer / LightGBM 基线集成、消融与 loss / 参数实验体系、248 维分钟级量价特征、Market84 与分钟级市场状态扩展，以及 multi-seed 评估和标准化结果整理。第三方版权与许可信息见[第三方声明](THIRD_PARTY_NOTICES.md)。
 
 ## License
 

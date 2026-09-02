@@ -7,6 +7,6 @@
   "training": {"num_boost_round": 2000, "early_stopping_rounds": 100, "minimum_valid_labels": 2},
   "rolling": {"frequency": "semiannual", "train_start": "2016-01-01", "test_start": "2023-01-01", "test_end": "2026-04-27"},
   "initialization": "cold", "seeds": [42, 43, 44],
-  "data": {"calendar": "data/calendar.csv", "membership": "data/membership.parquet", "label": "data/derived/relative_excess_return_5d.pkl", "label_column": "relative_excess_return_5d", "alpha158": "data/derived/alpha158", "market": "data/derived/market63"},
-  "output_root": "runs"
+  "data": {"calendar": "../../data/calendar.csv", "membership": "../../data/membership.parquet", "label": "../../data/derived/relative_excess_return_5d.pkl", "label_manifest": "../../data/derived/relative_excess_return_5d.manifest.json", "label_column": "relative_excess_return_5d", "alpha158": "../../data/derived/alpha158", "market": "../../data/derived/market63"},
+  "output_root": "../../runs"
 }

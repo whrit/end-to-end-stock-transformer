@@ -1,18 +1,10 @@
 # Results
 
-This directory contains the normalized public research results and their sanitized historical evidence.
+This directory contains the normalized research result tables retained with the public project.
 
-- `stage1/` — MASTER baseline, neural/tree baselines, ablations, losses, rolling comparisons, and seed robustness.
-- `stage2/` — intraday-extension capacity, Market84, attention-head, dual-frequency, and seed-robustness results.
-  - `late_regime_results.csv` — selected recovered target-level 2025H2 / 2026H1_partial diagnostics for the Stage 2 settings shown in the README.
-- `portfolio/` — selected portfolio evaluation aggregates.
-- `metadata/` — historical experiment and result-source registries.
-- `provenance/` — sanitized manifests, hashes, and recovery evidence.
+- `stage1/` — main MASTER results, neural/tree baselines, ablations, loss experiments, rolling-frequency comparisons, hyperparameter studies, and seed robustness.
+- `stage2/` — capacity, Market84, attention-head, dual-frequency, seed-robustness, and late-regime results.
+- `portfolio/` — supplemental portfolio evaluation aggregates.
+- `metric_definitions.json` — metric units, selection rules, filtering, and aggregation semantics.
 
-Top-level files:
-
-- `experiment_registry.csv` — public settings, historical identities, coverage, and aggregation semantics.
-- `metric_definitions.json` — metric definitions and units.
-- `conflicts.csv` — known small disagreements between historical aggregation sources.
-
-See [`docs/experiments.md`](../docs/experiments.md), [`docs/results_provenance.md`](../docs/results_provenance.md), and [`docs/portfolio_evaluation.md`](../docs/portfolio_evaluation.md) for interpretation and limitations.
+See the [experiment summary](../docs/experiments.md), [dual-frequency study](../docs/dual_frequency.md), and [portfolio evaluation notes](../docs/portfolio_evaluation.md) for interpretation and limitations.

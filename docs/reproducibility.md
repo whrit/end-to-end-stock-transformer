@@ -12,7 +12,7 @@ The canonical codebase:
 - separates immutable derived-data construction from repeated model training;
 - includes a focused test suite spanning formulas, contracts, storage, datasets, models, training, rolling orchestration, evaluation, and configuration parsing.
 
-Passing the public test suite in a current migration environment is not the same as rerunning historical full-scale training on the original hardware. No unverified Python-version compatibility claim is made beyond the declared `Python >= 3.8` package requirement and the grammar audit.
+Passing the public test suite validates the public code path, but is not the same as rerunning historical full-scale training on the original hardware. No unverified Python-version compatibility claim is made beyond the declared `Python >= 3.8` package requirement and the grammar audit.
 
 ## Reproduction levels
 
@@ -40,7 +40,7 @@ Install optional dependencies only when needed: `.[lightgbm]`, `.[parquet]`, or 
 ## Known limits
 
 - Public market data is not bundled and no vendor download claim is made.
-- Historical results include complete, partial, and unresolved experiments; status is never imputed.
+- Historical result tables include complete and partial experiments; unavailable metrics are not imputed.
 - Stage 2 does not contain a strictly matched Alpha158-only control under the same protocol.
-- Historical Stage 2 tables contain independently evaluated seed results, not a recovered raw prediction ensemble.
-- Sanitized portfolio aggregates are included in the public results, while the internal backtest engine, complete execution settings, and underlying proprietary evidence are not part of the repository.
+- Historical Stage 2 tables contain independently evaluated seed results rather than a materialized raw-prediction ensemble.
+- Portfolio aggregates are included in the public results, while the internal backtest engine, complete execution settings, and underlying proprietary evidence are not part of the repository.

@@ -19,14 +19,9 @@ The substantially similar adapted neural blocks are in
 `modeling/experimental/dual_frequency.py` reuses those adapted blocks inside a
 project-specific exploratory gating architecture. The surrounding canonical
 configuration, data transport, training, rolling, evaluation, feature/label,
-ablation, baseline, and provenance systems are project-specific engineering.
+ablation, baseline, and result-reporting systems are project-specific engineering.
 
-The upstream snapshot retained during migration carried the following MIT
-license notice. It is reproduced to preserve the upstream copyright and
-permission notice for adapted portions:
-
-A compact hash record of the deleted migration references is retained in
-`results/provenance/upstream_master_reference.json`.
+The adapted MASTER portions retain the upstream MIT notice below.
 
 ```text
 MIT License

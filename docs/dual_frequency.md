@@ -2,7 +2,7 @@
 
 This secondary Stage 2 study combines daily Market84 and minute-level Intraday Market Features (192D) with the Alpha158 + Intraday Price-Volume Features (248D) stock representation. It tests separate matched routing and learned joint all-to-all routing, plus hidden-capacity and attention-head variants.
 
-The table is single-seed historical evidence reconstructed from canonical target evaluations. It is not a multi-seed ensemble or seed-robustness table.
+The table reports one historical seed per row. It is not a multi-seed ensemble or seed-robustness table.
 
 | Public order | Routing | Capacity | Heads | Coverage | IC | RankIC | Top 5% (bp) | Top 10% (bp) |
 |---|---|---:|---|---|---:|---:|---:|---:|
@@ -15,6 +15,6 @@ The table is single-seed historical evidence reconstructed from canonical target
 | exp007 | separate/matched | D128 | T8×S2 | partial (2/7) | 0.0718 | 0.0881 | — | — |
 | exp008 | separate/matched | D128 | T4×S4 | partial (2/7) | 0.0715 | 0.0874 | — | — |
 
-`exp001–exp008` is the public sequential presentation order of the eight canonical rows; it does not fabricate missing historical execution IDs. The first six rows are complete, while exp007–008 retain partial IC/RankIC and missing Top 5% / Top 10% values.
+`exp001–exp008` is the sequential presentation order of the eight reported rows. The first six rows are complete, while exp007–008 retain partial IC/RankIC and missing Top 5% / Top 10% values.
 
-Within this limited single-seed sample, joint routing is higher than separate routing for the matched D128 and D256 pairs on IC and top-ranked returns, while the best metric varies across capacity and heads. The experiment had a limited compute/time budget and was not selected as the final production research configuration. Optimization of the richer joint-gating setting remains under-explored.
+Within this limited single-seed sample, joint routing is higher than separate routing for the matched D128 and D256 pairs on IC and top-ranked returns, while the best metric varies across capacity and heads. The study remained exploratory and was not exhaustively tuned. It was not selected as the main reported configuration, and optimization of the richer joint-gating setting remains under-explored.

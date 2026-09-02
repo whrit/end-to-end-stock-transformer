@@ -233,16 +233,16 @@ The long portfolio follows the historical backtest system's portfolio definition
 src/        canonical Python package
 configs/    self-describing Stage 1, Stage 2, secondary, and exploratory configs
 scripts/    public feature/label builders and rolling entry point
-tests/      canonical unit, integration, contract, and presentation tests
-results/    normalized result tables, metadata registries, metric definitions, and provenance
-docs/       data, reproducibility, experiment, and provenance documentation
+tests/      unit, integration, and contract tests
+results/    normalized Stage 1, Stage 2, and portfolio result tables
+docs/       data, feature, experiment, portfolio, and reproducibility documentation
 ```
 
 ## Quick Start
 
 ```bash
-pip install -e .
-# Optional: pip install -e ".[parquet,test]"
+pip install -e ".[parquet,test]"
+# Optional for LightGBM experiments: pip install -e ".[lightgbm]"
 
 python scripts/build_relative_excess_label.py \
   --stock-daily data/daily_stock.parquet \
@@ -262,8 +262,8 @@ python scripts/build_intraday_features.py intraday_price_volume \
   --input data/minute_stock.parquet \
   --output data/derived/intraday_price_volume
 
+# Prepare data/membership.parquet using the membership schema in docs/data_contract.md.
 python scripts/run_rolling.py configs/stage2/intraday_price_volume_master_d512_market63.json
-# Requires the optional test dependency.
 pytest
 ```
 
@@ -279,7 +279,7 @@ The historical results are research evidence, not claims of tradable performance
 
 The MASTER backbone is adapted from the official [SJTU-DMTai/MASTER](https://github.com/SJTU-DMTai/MASTER) implementation for **Li et al., “MASTER: Market-Guided Stock Transformer for Stock Price Forecasting,” AAAI 2024** ([paper](https://ojs.aaai.org/index.php/AAAI/article/view/27767)). The exact historical upstream commit was not recorded. The standard Alpha158 feature implementation is a pandas/NumPy adaptation of Microsoft Qlib's `Alpha158DL` definition.
 
-Building on this backbone, this repository implements the rolling OOS training and evaluation framework, leakage-aware label/data pipeline, GRU / Vanilla Transformer / LightGBM baselines, ablation/loss/hyperparameter experiments, intraday price-volume features, Market84 and intraday-market extensions, multi-seed evaluation, and result provenance. See [third-party notices](THIRD_PARTY_NOTICES.md) for upstream copyright and license information.
+Building on this backbone, this repository implements the rolling OOS training and evaluation framework, leakage-aware label/data pipeline, GRU / Vanilla Transformer / LightGBM baselines, ablation/loss/hyperparameter experiments, intraday price-volume features, Market84 and intraday-market extensions, multi-seed evaluation, and normalized result reporting. See [third-party notices](THIRD_PARTY_NOTICES.md) for upstream copyright and license information.
 
 ## License
 
