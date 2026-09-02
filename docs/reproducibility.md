@@ -10,7 +10,7 @@ The canonical codebase:
 - uses standard PyTorch device resolution for CPU/CUDA execution;
 - has been audited for Python 3.8 grammar compatibility;
 - separates immutable derived-data construction from repeated model training;
-- includes more than 100 canonical tests spanning formulas, contracts, storage, datasets, models, training, rolling orchestration, evaluation, configs, and presentation consistency.
+- includes a focused test suite spanning formulas, contracts, storage, datasets, models, training, rolling orchestration, evaluation, and configuration parsing.
 
 Passing the public test suite in a current migration environment is not the same as rerunning historical full-scale training on the original hardware. No unverified Python-version compatibility claim is made beyond the declared `Python >= 3.8` package requirement and the grammar audit.
 
