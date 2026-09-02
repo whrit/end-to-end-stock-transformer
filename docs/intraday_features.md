@@ -2,7 +2,7 @@
 
 ## Overview
 
-Intraday Price-Volume Features is a fixed 248-dimensional daily representation constructed from one stock's minute-level `open`, `high`, `low`, `close`, `volume`, and `amount` observations. Each eligible stock-day produces one 248D vector; minute bars are not passed directly to the forecasting model.
+Intraday Price-Volume Features is a fixed 248-dimensional daily representation constructed from one stock's minute-level `open`, `high`, `low`, `close`, `volume`, and `amt` (traded amount) observations. Each eligible stock-day produces one 248D vector; minute bars are not passed directly to the forecasting model.
 
 The representation was designed, organized, and implemented in this project. It uses standard statistical, financial, signal-processing, and geometric tools—including skewness, realized variation, concentration measures, Fourier transforms, entropy, path length, and curvature—but does not claim those mathematical tools themselves as original. The project contribution is the feature selection and combination, the session-aware multiscale construction, the frequency and path-shape representations, and the complete frozen F001–F248 system.
 
@@ -29,7 +29,7 @@ $$
 O_m,\ H_m,\ L_m,\ C_m,\ V_m,\ A_m,
 $$
 
-where $A_m$ is the minute `amount`. Volume and amount are per-bar increments, not cumulative session totals. The six fields must be aligned on the same 240-position grid. The implementation does not interpolate, forward-fill, backward-fill, or fill across dates.
+where $A_m$ is the minute `amt` (traded amount). Volume and amount are per-bar increments, not cumulative session totals. The six fields must be aligned on the same 240-position grid. The implementation does not interpolate, forward-fill, backward-fill, or fill across dates.
 
 ### Structural-inactive minutes
 

@@ -59,11 +59,12 @@ def _metric_value(total: float, count: int) -> Any:
 def evaluate_target(
     frame: pd.DataFrame, minimum_count: int = 2
 ) -> Tuple[Dict[str, Any], pd.DataFrame]:
-    """Evaluate one target using the formal 04 daily and pooling semantics.
+    """Evaluate one target using the canonical daily and pooling semantics.
 
-    IC/RankIC and percentile portfolios use raw labels.  MSE/R-squared use the
-    daily normalized training label.  Top5/Top10 mean top 5%/10%, not five or
-    ten securities, and are raw decimal returns without benchmark subtraction.
+    IC/RankIC and percentile portfolios use the raw CSI500-relative label.
+    MSE/R-squared use the daily normalized training label.  Top5/Top10 mean the
+    top 5%/10% of securities by score and are reported directly from the raw
+    target values.
     """
     if type(minimum_count) is not int or minimum_count < 2:
         raise ValueError("minimum_count must be an integer of at least two")
@@ -116,7 +117,7 @@ def evaluate_target(
                     metric_sums["rank_ic"] += rank_ic
                     metric_counts["rank_ic"] += 1
 
-            # Stable ascending order faithfully preserves the historical tie rule.
+            # Stable ascending order provides deterministic tie handling.
             order = np.argsort(prediction_raw, kind="mergesort")
             for name, fraction in (("top5", 0.05), ("top10", 0.10)):
                 top_count = max(1, int(np.ceil(len(order) * fraction)))

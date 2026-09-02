@@ -31,7 +31,7 @@ Passing the public test suite validates the public code path, but is not the sam
 ## Suggested commands
 
 ```bash
-pip install -e .
+pip install -e ".[test]"
 pytest
 ```
 

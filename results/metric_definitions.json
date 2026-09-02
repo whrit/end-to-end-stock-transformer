@@ -9,7 +9,7 @@
     "R2": "Pooled R-squared on the daily cross-sectionally normalized label."
   },
   "selection_and_filtering": {
-    "top_fraction": "max(1, ceil(valid_count * fraction)); stable descending score order",
+    "top_fraction": "max(1, ceil(valid_count * fraction)); stable ascending score sort, then select the highest-scoring tail",
     "minimum_valid_security_count": 2,
     "non_finite": "Excluded before daily metric computation; days below the minimum are not valid metric days."
   },
