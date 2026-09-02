@@ -37,8 +37,11 @@ Structural inactivity is detected from the same-date cross-section rather than f
 
 $$
 z_{d,m}=
-\frac{\#\{i\in\mathcal U_{d,m}:V_{i,d,m}=0,\ A_{i,d,m}=0\}}
-{\#\mathcal U_{d,m}}.
+\frac{
+\lvert{i\in\mathcal U_{d,m}:V_{i,d,m}=0,\ A_{i,d,m}=0}\rvert
+}{
+\lvert\mathcal U_{d,m}\rvert
+}.
 $$
 
 Position $m$ is structural inactive when $z_{d,m}\ge\tau_z$, with default $\tau_z=0.80$. Such rows are excluded from price, return, event, volume, spectral, and geometry calculations for every stock. Fixed time-of-day and 60-minute block boundaries remain attached to their original 240-position grid; they are not shifted to replace excluded rows.
@@ -49,7 +52,9 @@ Coverage is computed from the unmodified close grid:
 
 $$
 \mathrm{coverage}_{i,d}=
-\frac{\#\{m:C_{i,d,m}\text{ is finite}\}}{240}.
+\frac{
+\lvert{m:C_{i,d,m}\text{ is finite}}\rvert
+}{240}.
 $$
 
 The default eligibility threshold is 0.90. Factors for an ineligible stock-day are returned as missing, and the daily table writer emits eligible rows only. Structural-inactive rows do not reduce this close-based coverage measure.

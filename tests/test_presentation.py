@@ -337,6 +337,7 @@ def test_public_markdown_math_avoids_unsupported_github_macros():
     intraday_features = (DOCS / "intraday_features.md").read_text(encoding="utf-8")
     for legacy_delimiter in (r"\(", r"\)", r"\[", r"\]"):
         assert legacy_delimiter not in intraday_features
+    assert r"\#" not in intraday_features
     assert "\n=\n" not in intraday_features
 
     for path in (README, README_ZH):
