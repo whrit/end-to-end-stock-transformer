@@ -44,7 +44,7 @@ Alpha158, the 248D intraday features, Market63/84, and labels are computed once 
 
 ### Target and protocol
 
-For stock \(i\) at date \(t\), the raw target is
+For stock $i$ at date $t$, the raw target is
 
 $$
 y_{i,t}=

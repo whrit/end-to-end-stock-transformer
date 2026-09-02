@@ -23,46 +23,46 @@ The canonical session contains exactly 240 ordered trading bars:
 - morning session: positions 1–120;
 - afternoon session: positions 121–240.
 
-For stock \(i\), date \(d\), and normal trading position \(m\), the input fields are
+For stock $i$, date $d$, and normal trading position $m$, the input fields are
 
-\[
+$$
 O_m,\ H_m,\ L_m,\ C_m,\ V_m,\ A_m,
-\]
+$$
 
-where \(A_m\) is the minute `amount`. Volume and amount are per-bar increments, not cumulative session totals. The six fields must be aligned on the same 240-position grid. The implementation does not interpolate, forward-fill, backward-fill, or fill across dates.
+where $A_m$ is the minute `amount`. Volume and amount are per-bar increments, not cumulative session totals. The six fields must be aligned on the same 240-position grid. The implementation does not interpolate, forward-fill, backward-fill, or fill across dates.
 
 ### Structural-inactive minutes
 
-Structural inactivity is detected from the same-date cross-section rather than from a hard-coded clock time. Let \(\mathcal U_{d,m}\) be stocks for which both volume and amount are observed at position \(m\). Define
+Structural inactivity is detected from the same-date cross-section rather than from a hard-coded clock time. Let $\mathcal U_{d,m}$ be stocks for which both volume and amount are observed at position $m$. Define
 
-\[
+$$
 z_{d,m}=
 \frac{\#\{i\in\mathcal U_{d,m}:V_{i,d,m}=0,\ A_{i,d,m}=0\}}
 {\#\mathcal U_{d,m}}.
-\]
+$$
 
-Position \(m\) is structural inactive when \(z_{d,m}\ge\tau_z\), with default \(\tau_z=0.80\). Such rows are excluded from price, return, event, volume, spectral, and geometry calculations for every stock. Fixed time-of-day and 60-minute block boundaries remain attached to their original 240-position grid; they are not shifted to replace excluded rows.
+Position $m$ is structural inactive when $z_{d,m}\ge\tau_z$, with default $\tau_z=0.80$. Such rows are excluded from price, return, event, volume, spectral, and geometry calculations for every stock. Fixed time-of-day and 60-minute block boundaries remain attached to their original 240-position grid; they are not shifted to replace excluded rows.
 
 ### Coverage and eligibility
 
 Coverage is computed from the unmodified close grid:
 
-\[
+$$
 \mathrm{coverage}_{i,d}=
 \frac{\#\{m:C_{i,d,m}\text{ is finite}\}}{240}.
-\]
+$$
 
 The default eligibility threshold is 0.90. Factors for an ineligible stock-day are returned as missing, and the daily table writer emits eligible rows only. Structural-inactive rows do not reduce this close-based coverage measure.
 
 ### Minute-return convention
 
-After structural-inactive rows and invalid prices are excluded, valid positions keep their original order. If \(m_1,\ldots,m_M\) are the remaining valid close positions, then
+After structural-inactive rows and invalid prices are excluded, valid positions keep their original order. If $m_1,\ldots,m_M$ are the remaining valid close positions, then
 
-\[
+$$
 r_{m_1}=\log\frac{C_{m_1}}{O_{m_1}},
 \qquad
 r_{m_k}=\log\frac{C_{m_k}}{C_{m_{k-1}}},\quad k\ge2.
-\]
+$$
 
 Thus a missing individual bar is skipped rather than imputed, and the next valid close is compared with the last valid close. All prices used in a logarithm must be positive.
 
@@ -78,10 +78,10 @@ The 5m, 15m, and 30m series are non-overlapping block aggregates. Morning and af
 
 Block return, block volume, and block amount are sums of their finite 1m observations. A block with no finite observation is missing. The four fixed position blocks used elsewhere are
 
-\[
+$$
 B_1=1{:}60,\quad B_2=61{:}120,\quad
 B_3=121{:}180,\quad B_4=181{:}240.
-\]
+$$
 
 ### Invalid observations and output
 
@@ -91,28 +91,28 @@ Default minimum observations are 10 paired points for 1m correlations, 4 blocks 
 
 | Symbol | Meaning |
 |---|---|
-| \(r_m\) | cleaned minute log return under the convention above |
-| \(a_m=|r_m|\) | absolute minute return |
-| \(O_m,H_m,L_m,C_m\) | minute open, high, low, and close |
-| \(V_m,A_m\) | non-negative minute volume and amount |
-| \(RV=\sum_m r_m^2\) | 1m realized variance |
-| \(P_m=A_m/V_m\) | minute VWAP, defined only when both inputs are positive |
-| \(P_{day}=\sum_m A_m/\sum_m V_m\) | daily VWAP over jointly valid observations |
-| \(B_j\) | one of the four fixed 60-position blocks |
+| $r_m$ | cleaned minute log return under the convention above |
+| $a_m=\lvert r_m\rvert$ | absolute minute return |
+| $O_m,H_m,L_m,C_m$ | minute open, high, low, and close |
+| $V_m,A_m$ | non-negative minute volume and amount |
+| $RV=\sum_m r_m^2$ | 1m realized variance |
+| $P_m=A_m/V_m$ | minute VWAP, defined only when both inputs are positive |
+| $P_{day}=\sum_m A_m/\sum_m V_m$ | daily VWAP over jointly valid observations |
+| $B_j$ | one of the four fixed 60-position blocks |
 | session | morning positions 1–120 or afternoon positions 121–240 |
 | block | one non-overlapping 5m, 15m, or 30m session-local aggregate |
-| \(\varepsilon\) | numerical stabilizer, default \(10^{-12}\), used only where stated |
+| $\varepsilon$ | numerical stabilizer, default $10^{-12}$, used only where stated |
 
-For non-negative weights \(w_j\), let \(q_j=w_j/\sum_k w_k\). The common concentration summaries are
+For non-negative weights $w_j$, let $q_j=w_j/\sum_k w_k$. The common concentration summaries are
 
-\[
+$$
 \mathrm{HHI}(w)=\sum_jq_j^2,
 \qquad
 \mathrm{Entropy}(w)=
 -\frac{\sum_{j:q_j>0}q_j\log q_j}{\log K},
-\]
+$$
 
-where \(K\) is the number of finite input positions, including finite zero-weight positions, and must exceed one. Unless specified otherwise, standard deviations use the corrected sample denominator; geometry standardization uses population standard deviation, matching the implementation.
+where $K$ is the number of finite input positions, including finite zero-weight positions, and must exceed one. Unless specified otherwise, standard deviations use the corrected sample denominator; geometry standardization uses population standard deviation, matching the implementation.
 
 ## Feature Family Overview
 
@@ -139,100 +139,100 @@ Categories and counts below are generated from the frozen registry, not inferred
 
 `ret_skew` and `ret_kurt` are corrected sample skewness and Fisher corrected excess kurtosis. Sign and run features are
 
-\[
+$$
 \frac{1}{M}\sum_m\mathbf1(r_m>0),\qquad
 \frac{1}{M}\sum_m\mathbf1(|r_m|\le10^{-12}),
-\]
+$$
 
-the fraction of adjacent non-zero return pairs whose signs differ, and the longest strictly positive/negative run divided by \(M\). `absret_q90`, `absret_q95`, and `absret_q99` are the corresponding quantiles of \(|r|\). Tail asymmetry is
+the fraction of adjacent non-zero return pairs whose signs differ, and the longest strictly positive/negative run divided by $M$. `absret_q90`, `absret_q95`, and `absret_q99` are the corresponding quantiles of $|r|$. Tail asymmetry is
 
-\[
+$$
 \frac{Q_{.95}(r)-|Q_{.05}(r)|}
 {Q_{.95}(r)+|Q_{.05}(r)|},
-\]
+$$
 
-and `extreme_rv_share` is the share of \(RV\) contributed by the largest \(\lceil0.05M\rceil\) absolute returns.
+and `extreme_rv_share` is the share of $RV$ contributed by the largest $\lceil0.05M\rceil$ absolute returns.
 
 ### Volatility, jumps, and dependence — F013–F028
 
 The base volatility summaries are
 
-\[
+$$
 BV=\frac{\pi}{2}\sum_{m=2}^{M}|r_m||r_{m-1}|,
 \quad
 \mathrm{jump\_share}=\frac{\max(RV-BV,0)}{RV},
-\]
+$$
 
-\[
+$$
 \mathrm{downside\_rv}=\sum_{r_m<0}r_m^2,
 \quad
 \mathrm{RQ}=\frac{M}{3}\sum_mr_m^4.
-\]
+$$
 
 Minute-bar Parkinson and Rogers–Satchell quantities are summed across valid bars:
 
-\[
+$$
 \sum_m\frac{[\log(H_m/L_m)]^2}{4\log2},
-\]
+$$
 
-\[
+$$
 \sum_m\left[
 \log(H_m/O_m)\log(H_m/C_m)+
 \log(L_m/O_m)\log(L_m/C_m)
 \right].
-\]
+$$
 
-Maximum drawdown and drawup use the minute-close path. F023–F026 are lag-1 and lag-5 correlations of \(r\) and \(|r|\). F027–F028 compare squared 5m/15m block returns with 1m \(RV\).
+Maximum drawdown and drawup use the minute-close path. F023–F026 are lag-1 and lag-5 correlations of $r$ and $|r|$. F027–F028 compare squared 5m/15m block returns with 1m $RV$.
 
 ### Liquidity and concentration — F029–F040
 
-The family contains volume HHI, normalized volume entropy, volume Gini, amount HHI, maximum-minute and top-5%-minute volume shares, zero-volume ratio, and volume coefficient of variation. The Amihud-like observations are \(|r_m|/A_m\) for \(A_m>0\), summarized by their mean and 90th percentile.
+The family contains volume HHI, normalized volume entropy, volume Gini, amount HHI, maximum-minute and top-5%-minute volume shares, zero-volume ratio, and volume coefficient of variation. The Amihud-like observations are $|r_m|/A_m$ for $A_m>0$, summarized by their mean and 90th percentile.
 
-For positive minute volume and amount, define \(P_m=A_m/V_m\). `vwap_path_absdev` and `minute_vwap_dispersion` are respectively
+For positive minute volume and amount, define $P_m=A_m/V_m$. `vwap_path_absdev` and `minute_vwap_dispersion` are respectively
 
-\[
+$$
 \mathrm{Mean}\left|\log(P_m/P_{day})\right|,
 \qquad
 \mathrm{Std}\left[\log(P_m/P_{day})\right].
-\]
+$$
 
 ### Price-volume coupling — F041–F052 and F213–F228
 
-Let \(v_m=\log(1+V_m)\), \(u_m=\log(1+A_m)\), and \(\Delta v_m=v_m-v_{m-1}\). F041–F048 contain contemporaneous correlations between returns/absolute returns and \(v\) or \(\Delta v\), plus one-step lead-lag correlations in both directions. Signed imbalances are
+Let $v_m=\log(1+V_m)$, $u_m=\log(1+A_m)$, and $\Delta v_m=v_m-v_{m-1}$. F041–F048 contain contemporaneous correlations between returns/absolute returns and $v$ or $\Delta v$, plus one-step lead-lag correlations in both directions. Signed imbalances are
 
-\[
+$$
 \frac{\sum_m\mathrm{sign}(r_m)V_m}{\sum_mV_m},
 \qquad
 \frac{\sum_m\mathrm{sign}(r_m)A_m}{\sum_mA_m}.
-\]
+$$
 
 F051–F052 compare mean returns in the top and bottom volume quintiles.
 
-F213–F218 repeat the contemporaneous and bidirectional lead-lag construction with log amount \(u_m\). F219–F221 locate close, open, and daily VWAP relative to the day's price range:
+F213–F218 repeat the contemporaneous and bidirectional lead-lag construction with log amount $u_m$. F219–F221 locate close, open, and daily VWAP relative to the day's price range:
 
-\[
+$$
 \log(C_{last}/P_{day}),\quad
 \log(O_{first}/P_{day}),\quad
 \frac{P_{day}-L_{day}}{H_{day}-L_{day}}.
-\]
+$$
 
-F222–F224 are volume-weighted return, amount-weighted return, and the correlation between \(|r_m|\) and \(|\log(P_m/P_{day})|\). F225–F226 weight signed absolute returns by volume or amount. F227–F228 are the fractions of volume at positive- and negative-return positions.
+F222–F224 are volume-weighted return, amount-weighted return, and the correlation between $|r_m|$ and $|\log(P_m/P_{day})|$. F225–F226 weight signed absolute returns by volume or amount. F227–F228 are the fractions of volume at positive- and negative-return positions.
 
 ### Time of day — F053–F068
 
-The fixed windows are `open30` = 1–30, `midmorning` = 31–120, `midafternoon` = 121–210, and `close30` = 211–240. For each window \(S\), the implementation records
+The fixed windows are `open30` = 1–30, `midmorning` = 31–120, `midafternoon` = 121–210, and `close30` = 211–240. For each window $S$, the implementation records
 
-\[
+$$
 R(S)=\sum_{m\in S}r_m,
 \quad
 \mathrm{RVShare}(S)=\frac{\sum_{m\in S}r_m^2}{RV},
-\]
+$$
 
-\[
+$$
 \mathrm{VShare}(S)=\frac{\sum_{m\in S}V_m}{\sum_mV_m},
 \quad
 \mathrm{Range}(S)=\log\frac{\max_{m\in S}H_m}{\min_{m\in S}L_m}.
-\]
+$$
 
 Structural-inactive rows remain absent, but window boundaries do not move.
 
@@ -240,19 +240,19 @@ Structural-inactive rows remain absent, but window boundaries do not move.
 
 The spectral summaries are evaluated independently on three cleaned, order-preserving sequences:
 
-1. minute return \(r_m\);
-2. absolute minute return \(|r_m|\);
-3. log volume \(\log(1+V_m)\).
+1. minute return $r_m$;
+2. absolute minute return $|r_m|$;
+3. log volume $\log(1+V_m)$.
 
-Missing and structural-inactive positions are not filled. For each stock, the finite observations are packed in their original order. Let the resulting sequence have length \(M\), center it as \(\tilde x_m=x_m-\bar x\), and compute the real FFT:
+Missing and structural-inactive positions are not filled. For each stock, the finite observations are packed in their original order. Let the resulting sequence have length $M$, center it as $\tilde x_m=x_m-\bar x$, and compute the real FFT:
 
-\[
+$$
 X_k=\sum_{m=0}^{M-1}\tilde x_m e^{-2\pi i km/M}.
-\]
+$$
 
-The DC term \(k=0\) is removed. For the remaining bins,
+The DC term $k=0$ is removed. For the remaining bins,
 
-\[
+$$
 P_k=|X_k|^2,
 \qquad
 p_k=\frac{P_k}{\sum_{j>0}P_j},
@@ -260,40 +260,40 @@ p_k=\frac{P_k}{\sum_{j>0}P_j},
 T_k=\frac{M}{k},
 \qquad
 f_k=\frac{k}{M}.
-\]
+$$
 
 The five base summaries for each sequence are
 
-\[
+$$
 \mathrm{low\_share}=\sum_{k:T_k\ge60}p_k,
 \qquad
 \mathrm{high\_share}=\sum_{k:T_k<15}p_k,
-\]
+$$
 
-\[
+$$
 \mathrm{spectral\_entropy}=
 -\frac{\sum_kp_k\log p_k}{\log K},
 \qquad
 \mathrm{centroid}=\sum_kp_kf_k,
-\]
+$$
 
-\[
+$$
 \mathrm{dominant\_period}=T_{\arg\max_k P_k},
-\]
+$$
 
-where \(K\) is the total number of non-DC real-FFT bins. Zero-power bins contribute zero to the entropy numerator. Constant or near-constant sequences with total non-DC power at or below \(\varepsilon\) return missing spectral summaries.
+where $K$ is the total number of non-DC real-FFT bins. Zero-power bins contribute zero to the entropy numerator. Constant or near-constant sequences with total non-DC power at or below $\varepsilon$ return missing spectral summaries.
 
 The three enhanced low/high ratios are
 
-\[
+$$
 \log\frac{P_{low}+\varepsilon}{P_{high}+\varepsilon},
-\]
+$$
 
-computed only when both low- and high-frequency bin sets exist and total usable power is positive. Spectral slope is the OLS coefficient \(b\) in
+computed only when both low- and high-frequency bin sets exist and total usable power is positive. Spectral slope is the OLS coefficient $b$ in
 
-\[
+$$
 \log(P_k+\varepsilon)=a+b\log f_k,
-\]
+$$
 
 using all positive non-DC frequencies and requiring at least three bins.
 
@@ -301,64 +301,64 @@ using all positive non-DC frequencies and requiring at least three bins.
 
 For the finite cleaned returns, define the cumulative path
 
-\[
+$$
 y_m=\sum_{j\le m}r_j,
 \qquad
 x_m=\frac{m-1}{M-1},
-\]
+$$
 
 and its standardized ordinate
 
-\[
+$$
 \tilde y_m=\frac{y_m-\bar y}{s_y},
 \qquad s_y=\mathrm{Std}_{\mathrm{ddof}=0}(y).
-\]
+$$
 
-The 2D path is \(\gamma_m=(x_m,\tilde y_m)\). When \(s_y\le\varepsilon\), standardized geometry is undefined.
+The 2D path is $\gamma_m=(x_m,\tilde y_m)$. When $s_y\le\varepsilon$, standardized geometry is undefined.
 
 `path_efficiency` uses the unstandardized cumulative path:
 
-\[
+$$
 \frac{|y_M-y_1|}{\sum_{m=2}^{M}|y_m-y_{m-1}|}.
-\]
+$$
 
 For standardized geometry, arc length and chord length are
 
-\[
+$$
 L=\sum_{m=2}^{M}\|\gamma_m-\gamma_{m-1}\|_2,
 \qquad
 D=\|\gamma_M-\gamma_1\|_2,
-\]
+$$
 
-and `arc_chord_ratio` is \(L/D\). Interpolate the endpoint chord by
+and `arc_chord_ratio` is $L/D$. Interpolate the endpoint chord by
 
-\[
+$$
 \ell(x)=\tilde y_1+(\tilde y_M-\tilde y_1)
 \frac{x-x_1}{x_M-x_1},
 \qquad
 d_m=\tilde y_m-\ell(x_m).
-\]
+$$
 
-The signed and absolute chord areas are trapezoidal integrals of \(d(x)\) and \(|d(x)|\). Maximum and RMS chord deviation are \(\max_m|d_m|\) and \(\sqrt{M^{-1}\sum_md_m^2}\).
+The signed and absolute chord areas are trapezoidal integrals of $d(x)$ and $|d(x)|$. Maximum and RMS chord deviation are $\max_m|d_m|$ and $\sqrt{M^{-1}\sum_md_m^2}$.
 
-At an internal path point, a strict turn occurs when the adjacent non-zero path increments have opposite signs. Turning rate divides the number of such changes by \(M-2\). Directional change angle is
+At an internal path point, a strict turn occurs when the adjacent non-zero path increments have opposite signs. Turning rate divides the number of such changes by $M-2$. Directional change angle is
 
-\[
+$$
 \theta_m=\arccos
 \frac{u_m\cdot v_m}{\|u_m\|\|v_m\|},
-\]
+$$
 
-where \(u_m=\gamma_m-\gamma_{m-1}\) and \(v_m=\gamma_{m+1}-\gamma_m\). F094–F095 are its mean and 90th percentile.
+where $u_m=\gamma_m-\gamma_{m-1}$ and $v_m=\gamma_{m+1}-\gamma_m$. F094–F095 are its mean and 90th percentile.
 
-For three consecutive standardized path points \(A,B,C\), let \(a,b,c\) be their side lengths and \(\Delta\) the triangle area. Discrete curvature is
+For three consecutive standardized path points $A,B,C$, let $a,b,c$ be their side lengths and $\Delta$ the triangle area. Discrete curvature is
 
-\[
+$$
 \kappa=\frac{4\Delta}{abc}.
-\]
+$$
 
-F096–F098 are mean absolute curvature, its 90th percentile, and curvature energy \(\mathrm{Mean}(\kappa^2)\). Degenerate triples return missing rather than infinity.
+F096–F098 are mean absolute curvature, its 90th percentile, and curvature energy $\mathrm{Mean}(\kappa^2)$. Degenerate triples return missing rather than infinity.
 
-For `roughness_5m_1m` and `roughness_15m_1m`, the coarse cumulative paths reuse the 1m path's mean and standard deviation, remap coarse time to \([0,1]\), and divide coarse arc length by 1m arc length. F235–F240 instead recompute mean absolute curvature and curvature energy on separately standardized 5m, 15m, and 30m paths.
+For `roughness_5m_1m` and `roughness_15m_1m`, the coarse cumulative paths reuse the 1m path's mean and standard deviation, remap coarse time to $[0,1]$, and divide coarse arc length by 1m arc length. F235–F240 instead recompute mean absolute curvature and curvature energy on separately standardized 5m, 15m, and 30m paths.
 
 ### Position blocks — F101–F132 and F241–F248
 
@@ -378,9 +378,9 @@ The multiscale system therefore covers 1m, 5m, 15m, and 30m views without joinin
 
 The first-versus-last 60-minute contrasts are return difference, RV log-ratio, and volume-share difference. The morning-versus-afternoon contrasts use the corresponding two blocks on each side. RV ratios use
 
-\[
+$$
 \log\frac{RV_L+\varepsilon}{RV_R+\varepsilon},
-\]
+$$
 
 but return missing when both sides are zero.
 
@@ -388,7 +388,7 @@ but return missing when both sides are zero.
 
 F149–F151 are the maximum minute return, minimum minute return (the negative sign is retained), and maximum absolute minute return. F152–F160 record the first normalized positions of those events, maximum volume, maximum amount, intraday high, intraday low, maximum-drawdown end, and maximum-drawup end.
 
-Structural-inactive rows are removed before event search. If \(M_a\) globally active rows remain, a selected row index \(j\in\{0,\ldots,M_a-1\}\) is reported as \(j/(M_a-1)\). Individual-stock missing observations remain missing within this active grid and are not replaced. Ties use the first occurrence.
+Structural-inactive rows are removed before event search. If $M_a$ globally active rows remain, a selected row index $j\in\{0,\ldots,M_a-1\}$ is reported as $j/(M_a-1)$. Individual-stock missing observations remain missing within this active grid and are not replaced. Ties use the first occurrence.
 
 ### Morning and afternoon shapes — F161–F176
 
@@ -396,15 +396,15 @@ Morning and afternoon separately recompute corrected return skewness, corrected 
 
 ### Full-day concentration, range, and trend — F197–F212
 
-F197–F200 summarize 1m squared-return concentration: HHI, normalized entropy, maximum-minute RV share, and the share contributed by the largest \(\lceil0.01M\rceil\) absolute returns. F201–F203 are median absolute return, return median absolute deviation, and return interquartile range.
+F197–F200 summarize 1m squared-return concentration: HHI, normalized entropy, maximum-minute RV share, and the share contributed by the largest $\lceil0.01M\rceil$ absolute returns. F201–F203 are median absolute return, return median absolute deviation, and return interquartile range.
 
-Let \(g_m=\log(H_m/L_m)\) on valid positive bars. F204–F206 are its mean, corrected sample standard deviation, and HHI of \(g_m^2\). For trend features, regress cumulative return on normalized valid position:
+Let $g_m=\log(H_m/L_m)$ on valid positive bars. F204–F206 are its mean, corrected sample standard deviation, and HHI of $g_m^2$. For trend features, regress cumulative return on normalized valid position:
 
-\[
+$$
 y_m=\alpha+\beta x_m+e_m.
-\]
+$$
 
-F207–F209 are \(\beta\), \(R^2\), and \(\sqrt{M^{-1}\sum_me_m^2}\). F210–F212 are maximum absolute block returns at 5m, 15m, and 30m.
+F207–F209 are $\beta$, $R^2$, and $\sqrt{M^{-1}\sum_me_m^2}$. F210–F212 are maximum absolute block returns at 5m, 15m, and 30m.
 
 ## Design Inspiration
 
