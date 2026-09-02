@@ -8,14 +8,20 @@ At each prediction date, the model processes a dynamic cross-section of A-shares
 
 **Data coverage:** market history from 2016 onward; rolling OOS prediction and evaluation from 2023 through 2026-04-27, with 2026H1 representing a partial period.
 
-## Highlights
+## Internship Work
 
-- Transformer-based sequence modeling with temporal attention, cross-sectional stock interaction, and market-state-conditioned feature gating.
-- Multi-source, multi-frequency feature fusion combines the standard Alpha158 feature set with project-designed Intraday Price-Volume Features (248D).
-- An adapted MASTER backbone is compared with GRU and Vanilla Transformer neural baselines and a LightGBM tabular baseline under the same temporal protocol.
-- Feature construction, model training, rolling scheduling, checkpoint/resume, and evaluation remain cleanly separated.
-- The experiments use a date-varying A-share universe and a `t+1 → t+6` five-trading-day CSI500-relative target with leakage-aware purging.
-- IC, RankIC, Top 5% / Top 10% returns, ablations, sensitivity studies, multi-seed robustness, and prediction-level ensembling are reported explicitly.
+- Built a raw-market-data pipeline that computes the standard Alpha158 representation, Market63/84, and the CSI500-relative target from daily stock and index data.
+- Implemented a date-varying A-share universe, one unified trading calendar, and `t+6` dependency purging across rolling splits.
+- Built precomputed NumPy/mmap feature caches, offline label artifacts, and manifest/hash checks for reproducible reuse across rolling windows.
+- Adapted the public MASTER backbone into a rolling OOS training and evaluation system with checkpoint/resume, warm/cold initialization, and multi-seed orchestration.
+- Implemented LightGBM, GRU, and Vanilla Transformer baselines together with ablation, loss, hyperparameter, and rolling-frequency studies.
+- Designed and implemented a structured 248-dimensional intraday price-volume feature system to test whether minute-level information could complement daily Alpha158 features.
+
+## Representative Outcomes
+
+- Across the selected configurations below, representative historical rolling OOS results reached IC up to 0.0816, RankIC up to 0.1095, and Top 5% five-trading-day CSI500-relative return up to 7.131‰.
+- In a controlled Stage 1 ablation, removing inter-stock interaction reduced both IC and RankIC.
+- These outcomes summarize different historical configurations; they are not a strictly matched Stage 1 versus Stage 2 feature-ablation result.
 
 ## Research Pipeline
 
@@ -63,15 +69,15 @@ The MASTER backbone, adapted from the official implementation, follows this flow
 
 ### Stage 2 — Intraday Feature Design and Extension
 
-Initially, I only had daily market data, so Stage 1 established the daily feature pipeline, market-state representation, rolling OOS protocol, and Transformer baseline. After minute-level data became available, my immediate goal was to test whether intraday information added predictive value beyond the daily representation.
+Only daily market data were available at the start of the project, so Stage 1 established the daily feature pipeline, market-state representation, rolling OOS protocol, and Transformer baseline. After minute-level data became available, Stage 2 focused on testing whether intraday information added predictive value beyond the daily representation.
 
-To keep this comparison focused, I kept the model backbone and rolling setup broadly fixed and first compressed each stock-day's minute data into an interpretable 248D representation, which was fused with Alpha158 in the same eight-day Transformer framework. Direct modeling of raw minute-level sequences remains future work.
+To keep this comparison focused, the model backbone and rolling setup were kept broadly fixed. Each stock-day's minute data were first compressed into an interpretable 248D representation, which was fused with Alpha158 in the same eight-day Transformer framework. Direct modeling of raw minute-level sequences remains future work.
 
 #### Intraday feature design
 
-Before defining individual features, I considered which parts of intraday trading behavior I wanted to capture: distributional shape, volatility and liquidity, price-volume interaction, time-of-day and cross-session structure, frequency composition, geometric path shape, event timing, and behavior across scales. I then organized these ideas into the 11 families below and implemented the finalized F001–F248 representation.
+The feature design focused on capturing distributional shape, volatility and liquidity, price-volume interaction, time-of-day and cross-session structure, frequency composition, geometric path shape, event timing, and behavior across scales. These ideas were then organized into the 11 families below and implemented as the finalized F001–F248 representation.
 
-The underlying mathematical tools—including standard statistics, FFTs, entropy, and curvature—are not original to this project. I selected and organized the features, adapted them to intraday market data, constructed the session-aware and multiscale representations, and implemented the spectral and path-shape components as one fixed 248D system.
+The underlying mathematical tools—including standard statistics, FFTs, entropy, and curvature—are not original to this project. The project contribution lies in selecting and organizing the features, adapting them to intraday market data, constructing the session-aware and multiscale representations, and implementing the spectral and path-shape components as one fixed 248D system.
 
 | Feature family | Count |
 |---|---:|
@@ -131,7 +137,7 @@ Statistics, volatility concentration, and path shape are recomputed at 1m, 5m, 1
 
 **Full F001–F248 definitions, formulas, interpretations, and implementation mapping:** [`docs/intraday_features.md`](docs/intraday_features.md)
 
-Design inspiration: when developing the frequency- and path-based representations, I drew on literature on frequency decomposition, functional data, and high-frequency market representations; the final feature definitions and implementation are specific to this project.
+Design inspiration came from literature on frequency decomposition, functional data, and high-frequency market representations; the final feature definitions and implementation are specific to this project.
 
 Stage 2 therefore uses `Alpha158 (158D) + Intraday Price-Volume Features (248D) = 406D` as the stock representation. The current path is minute data → stock-day 248D representation → 8-day sequence → Transformer; it does not directly feed `8 × 240` raw minute bars into the Transformer.
 
@@ -157,9 +163,11 @@ Detailed experiment tables are available in the [experiment summary](docs/experi
 
 - **Richer Stage 2 models became more configuration-sensitive.** Different capacities, temporal/cross-sectional head settings, seeds, and later market periods favored different evaluation metrics. The exploratory [dual-frequency market-state models](docs/dual_frequency.md) also showed remaining optimization and regularization headroom rather than a fully tuned optimum.
 
-## Selected Results
+## Representative Historical Runs
 
 The table shows a subset of representative historical experiments. Complete experiment results are available under [`results/`](results/) and in the [experiment summary](docs/experiments.md).
+
+These rows summarize representative historical configurations and should not be interpreted as a controlled Stage 1 vs Stage 2 feature-ablation comparison.
 
 **Stage 1** uses Alpha158; **Stage 2** uses Alpha158 + 248D Intraday Price-Volume Features. **M63/M84** denotes the market-state configuration, **D** the hidden dimension, and **H=T×S** the temporal × cross-sectional attention heads. **Seed42** denotes a single-seed model; **Seeds42/43/44 Ensemble** denotes a prediction-level ensemble.
 
@@ -186,9 +194,9 @@ For context, the **Stage 1 · M63 · D512 · H4×2 · Seeds42/43/44 Ensemble** r
 
 The differences across attention settings, seeds, and the two later periods show clear regime and configuration dependence; no setting leads across every period and metric.
 
-## Selected Portfolio Evaluation
+## Supplementary Portfolio Evaluation
 
-These results come from the internal portfolio backtest used during the internship and provide a complementary view of signal selection quality; transaction fees were not deducted. Only selected signals entered this backtest, so the results are not a controlled comparison across all experiments.
+These historical portfolio statistics are supplementary evidence and are not used as the primary measure of predictive model quality. They come from the internal portfolio backtest used during the internship, and transaction fees were not deducted. Only selected signals entered this backtest, so the results are not a controlled comparison across all experiments.
 
 | Setting | Long Ann. Return | Long Sharpe | Long-Short Ann. Return | Long-Short Sharpe | Mean Turnover |
 |---|---:|---:|---:|---:|---:|
@@ -197,7 +205,7 @@ These results come from the internal portfolio backtest used during the internsh
 | Stage 2 · M63 · D256 · H4×2 · Seed43 | 18.3% | 1.119 | 108.3% | 6.108 | 37.6% |
 | Stage 2 · M63 · D512 · H4×2 · Seed42 | 21.4% | 1.363 | 110.9% | 6.711 | 54.1% |
 
-The long portfolio follows the historical backtest system's portfolio definition and is separate from the prediction Top 5% / Top 10% metrics. Among the representative runs shown here, the D512 intraday model has higher portfolio return and Sharpe, together with higher mean turnover. Full aggregate statistics and limitations are in [portfolio evaluation](docs/portfolio_evaluation.md).
+The long portfolio follows the historical backtest system's portfolio definition and is separate from the prediction Top 5% / Top 10% metrics. Full aggregate statistics and limitations are in [portfolio evaluation](docs/portfolio_evaluation.md).
 
 ## Open Directions
 

@@ -152,4 +152,6 @@ def test_portfolio_public_docs_disclose_method_limits_without_overclaiming():
         assert "transaction fees were not deducted" in text.lower()
         assert "not a controlled comparison" in text.lower()
         assert "long portfolio" in text.lower()
-    assert "higher portfolio return and Sharpe, together with higher mean turnover" in english
+    assert "## Supplementary Portfolio Evaluation" in english
+    assert "not used as the primary measure of predictive model quality" in english.lower()
+    assert "higher portfolio return and Sharpe, together with higher mean turnover" not in english

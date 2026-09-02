@@ -17,6 +17,7 @@ if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
 
 from market_guided_stock_alpha.labels.derived_label import DerivedLabelReader
+from market_guided_stock_alpha.labels.forward_return import ForwardReturnLabelGenerator
 from market_guided_stock_alpha.labels.relative_excess_return import (
     DEFAULT_BENCHMARK_CODE,
     DEFAULT_VALUE_COLUMN,
@@ -68,6 +69,20 @@ class RelativeExcessLabelTest(unittest.TestCase):
         self.assertEqual(LABEL_END_OFFSET_TRADING_DAYS, 6)
         self.assertEqual(HOLDING_PERIOD_TRADING_DAYS, 5)
         self.assertEqual(PURGE_DEPENDENCY_OFFSET_TRADING_DAYS, 6)
+
+    def test_auxiliary_forward_return_horizon_is_fixed(self):
+        for generator in (
+            ForwardReturnLabelGenerator(),
+            ForwardReturnLabelGenerator(horizon_start=1, horizon_end=5),
+        ):
+            self.assertEqual(generator.horizon_start, 1)
+            self.assertEqual(generator.horizon_end, 5)
+        for horizon_start, horizon_end in ((2, 5), (1, 6)):
+            with self.assertRaises(ValueError):
+                ForwardReturnLabelGenerator(
+                    horizon_start=horizon_start,
+                    horizon_end=horizon_end,
+                )
 
     def test_calendar_mapping_uses_t1_and_t6(self):
         mapping = build_calendar_mapping(self.calendar)

@@ -73,8 +73,8 @@ def test_readme_prediction_table_has_explicit_seed_and_aggregation_semantics():
     chinese = README_ZH.read_text(encoding="utf-8")
     assert "mean ± sample standard deviation across three independently trained seeds" not in english
     assert "Seed / aggregation" not in english
-    assert "## Selected Results" in english
-    assert "## 部分实验结果" in chinese
+    assert "## Representative Historical Runs" in english
+    assert "## 代表性历史实验" in chinese
     assert _parameterized_setting("Stage 1", stage1, ensemble=True) in english
     assert _parameterized_setting("Stage 1", stage1, ensemble=True) in chinese
     for _, row in stage2.iterrows():
@@ -258,8 +258,11 @@ def test_readme_data_dates_frequencies_and_feature_origins_are_supported():
         assert "Qlib" in text
         assert "248" in text
 
-    assert "project-designed Intraday Price-Volume Features" in english
-    assert "本项目设计" in chinese
+    assert (
+        "Designed and implemented a structured 248-dimensional intraday "
+        "price-volume feature system"
+    ) in english
+    assert "设计并实现一套结构化的 248 维分钟级量价特征系统" in chinese
     assert "proprietary alpha data" not in english.lower()
     assert "company factor library" in english.lower()
     assert "did not use a company factor library" in english

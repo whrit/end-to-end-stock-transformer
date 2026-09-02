@@ -32,6 +32,8 @@ class ForwardReturnLabelGenerator:
             raise ValueError("horizon_start must be a positive integer")
         if type(horizon_end) is not int or horizon_end < horizon_start:
             raise ValueError("horizon_end must be an integer >= horizon_start")
+        if horizon_start != 1 or horizon_end != 5:
+            raise ValueError("auxiliary forward return requires horizon_start=1 and horizon_end=5")
         self.horizon_start = horizon_start
         self.horizon_end = horizon_end
 
