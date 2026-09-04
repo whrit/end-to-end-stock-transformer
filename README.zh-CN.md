@@ -269,6 +269,29 @@ pytest
 
 仓库不包含原始市场数据。请按照[公开数据契约](docs/data_contract.md)准备自己的数据；以上路径仅为示例。
 
+### 自定义实验配置
+
+如果要运行自己的实验，可以先从 `configs/` 中复制一个最接近目标设置的 JSON 配置文件，修改 `experiment_name` 和数据路径，再按需要调整项目特有的配置项。
+
+| 参数 | 含义 | 可选值 / 约束 |
+|---|---|---|
+| `feature_layout` | 指定实验使用的股票特征与市场状态特征组合。 | `stage1_market63`、`stage2_market63`、`stage2_market84` 或 `dual_frequency_exploratory` |
+| `model.beta` | MASTER 市场状态引导特征门控中的正缩放参数，用于控制市场引导作用的强度。 | 有限实数且 `> 0` |
+| `model.temporal_heads` | 时间维注意力模块使用的 attention head 数。 | 正整数，并且必须整除 `d_model` |
+| `model.spatial_heads` | 股票横截面交互使用的 attention head 数。 | 正整数，并且必须整除 `d_model` |
+| `rolling.frequency` | 滚动样本外目标生成和模型更新的频率。 | `semiannual`、`quarterly` 或 `monthly` |
+| `initialization` | 相邻 rolling target 之间的模型初始化方式。`warm` 复用兼容的模型权重，`cold` 重新初始化模型。 | `warm` 或 `cold`；LightGBM 必须使用 `cold` |
+
+常规训练超参数直接在 JSON 配置文件中设置，并由运行时进行合法性校验。
+
+修改配置后运行：
+
+```bash
+python scripts/run_rolling.py path/to/config.json --device cuda
+```
+
+如果希望跳过已经完成且兼容性校验通过的 rolling targets，可以加上 `--resume`。
+
 ## 复现范围与限制
 
 历史实验从实习环境提供的基础市场数据出发，包括股票日频与分钟行情、指数行情、动态股票池和交易日历。本项目没有把公司内部因子库作为模型输入：Alpha158 按公开标准定义从日频行情计算，248 维 Intraday Price-Volume Features 则由本项目设计并从分钟行情构造。由于数据授权与合规限制，原始行情不随仓库发布；复现历史指标仍需准备覆盖范围相当的数据和算力。详见[数据契约](docs/data_contract.md)与[复现说明](docs/reproducibility.md)。

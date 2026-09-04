@@ -269,6 +269,29 @@ pytest
 
 The repository does not ship raw market data. Prepare your own data according to the documented [data contracts](docs/data_contract.md); paths above are examples only.
 
+### Custom Experiment Configuration
+
+To run a custom experiment, copy the closest JSON config under `configs/`, update `experiment_name` and the data paths, and then modify the project-specific settings as needed.
+
+| Field | Meaning | Allowed values / constraints |
+|---|---|---|
+| `feature_layout` | Selects the stock and market feature layout used by the experiment. | `stage1_market63`, `stage2_market63`, `stage2_market84`, or `dual_frequency_exploratory` |
+| `model.beta` | Positive scaling parameter controlling the strength of MASTER's market-guided feature gating. | Finite value `> 0` |
+| `model.temporal_heads` | Number of attention heads used in the temporal attention modules. | Positive integer that divides `d_model` |
+| `model.spatial_heads` | Number of attention heads used for cross-sectional stock interaction. | Positive integer that divides `d_model` |
+| `rolling.frequency` | Frequency at which rolling out-of-sample targets are generated and the model is updated. | `semiannual`, `quarterly`, or `monthly` |
+| `initialization` | Initialization strategy between consecutive rolling targets. `warm` reuses compatible model weights; `cold` initializes a new model. | `warm` or `cold`; LightGBM requires `cold` |
+
+Standard training hyperparameters are specified directly in the JSON configs and validated by the runtime.
+
+After editing the config:
+
+```bash
+python scripts/run_rolling.py path/to/config.json --device cuda
+```
+
+Use `--resume` to skip compatible targets that have already been completed.
+
 ## Reproducibility and Limitations
 
 Historical experiments started from basic market data provided in the internship environment: daily and minute stock data, index data, dynamic-universe membership, and a trading calendar. The project did not use a company factor library as model input: standard Alpha158 features are computed from daily market data, while the 248-dimensional Intraday Price-Volume Features are designed in this project and constructed from minute data. Raw market data cannot be redistributed because of licensing and compliance constraints. Reproducing historical metrics still requires equivalent data coverage and compute. See [data contracts](docs/data_contract.md) and [reproducibility](docs/reproducibility.md).
