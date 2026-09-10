@@ -2,11 +2,11 @@
 
 ## Historical environment versus public validation
 
-Historical experiments were run with **Python 3.8.13** in a restricted internship compute environment using proprietary accelerator hardware. Those constraints describe the original experiment environment, not a dependency of the public package.
+Historical experiments were run with **Python 3.8.13** in a restricted research compute environment using specialized accelerator hardware. Those constraints describe the original experiment environment, not a dependency of the public package.
 
 The canonical codebase:
 
-- removes company-specific database and infrastructure dependencies from the public workflow;
+- removes environment-specific database and infrastructure dependencies from the public workflow;
 - uses standard PyTorch device resolution for CPU/CUDA execution;
 - has been audited for Python 3.8 grammar compatibility;
 - separates immutable derived-data construction from repeated model training;
@@ -43,4 +43,4 @@ Install optional dependencies only when needed: `.[lightgbm]`, `.[parquet]`, or 
 - Historical result tables include complete and partial experiments; unavailable metrics are not imputed.
 - Stage 2 does not contain a strictly matched Alpha158-only control under the same protocol.
 - Historical Stage 2 tables contain independently evaluated seed results rather than a materialized raw-prediction ensemble.
-- Portfolio aggregates are included in the public results, while the internal backtest engine, complete execution settings, and underlying proprietary evidence are not part of the repository.
+- Portfolio aggregates are included in the public results, while the complete backtest implementation, execution settings, and underlying non-public evidence are not part of the repository.

@@ -8,7 +8,7 @@ At each prediction date, the model processes a dynamic cross-section of A-shares
 
 **Data coverage:** market history from 2016 onward; rolling OOS prediction and evaluation from 2023 through 2026-04-27, with 2026H1 representing a partial period.
 
-## Internship Work
+## Project Contributions
 
 - Built a raw-market-data pipeline that computes the standard Alpha158 representation, Market63/84, and the CSI500-relative target from daily stock and index data.
 - Implemented a date-varying A-share universe, one unified trading calendar, and `t+6` dependency purging across rolling splits.
@@ -196,7 +196,7 @@ The differences across attention settings, seeds, and the two later periods show
 
 ## Supplementary Portfolio Evaluation
 
-These historical portfolio statistics are supplementary evidence and are not used as the primary measure of predictive model quality. They come from the internal portfolio backtest used during the internship, and transaction fees were not deducted. Only selected signals entered this backtest, so the results are not a controlled comparison across all experiments.
+These historical portfolio statistics are supplementary evidence and are not used as the primary measure of predictive model quality. They come from the historical portfolio backtest used for the reported experiments, and transaction fees were not deducted. Only selected signals entered this backtest, so the results are not a controlled comparison across all experiments.
 
 | Setting | Long Ann. Return | Long Sharpe | Long-Short Ann. Return | Long-Short Sharpe | Mean Turnover |
 |---|---:|---:|---:|---:|---:|
@@ -294,9 +294,9 @@ Use `--resume` to skip compatible targets that have already been completed.
 
 ## Reproducibility and Limitations
 
-Historical experiments started from basic market data provided in the internship environment: daily and minute stock data, index data, dynamic-universe membership, and a trading calendar. The project did not use a company factor library as model input: standard Alpha158 features are computed from daily market data, while the 248-dimensional Intraday Price-Volume Features are designed in this project and constructed from minute data. Raw market data cannot be redistributed because of licensing and compliance constraints. Reproducing historical metrics still requires equivalent data coverage and compute. See [data contracts](docs/data_contract.md) and [reproducibility](docs/reproducibility.md).
+Historical experiments started from basic market data available in the original research environment: daily and minute stock data, index data, dynamic-universe membership, and a trading calendar. The project did not use an external factor library as model input: standard Alpha158 features are computed from daily market data, while the 248-dimensional Intraday Price-Volume Features are designed in this project and constructed from minute data. Raw market data cannot be redistributed because of licensing and compliance constraints. Reproducing historical metrics still requires equivalent data coverage and compute. See [data contracts](docs/data_contract.md) and [reproducibility](docs/reproducibility.md).
 
-The historical results are research evidence, not claims of tradable performance. The selected portfolio statistics came from the internal historical backtesting system used during the internship, and transaction fees were not deducted. The public repository retains the reported aggregates and known conventions, while complete internal execution settings and implementation details were not fully recorded in this project. Stage 2 lacks an exact matched Alpha158-only control, and several experiments are explicitly partial.
+The historical results are research evidence, not claims of tradable performance. The selected portfolio statistics came from the historical backtesting workflow used for the reported experiments, and transaction fees were not deducted. The public repository retains the reported aggregates and known conventions, while the complete execution settings and implementation details of that backtest are not part of this repository. Stage 2 lacks an exact matched Alpha158-only control, and several experiments are explicitly partial.
 
 ## Attribution
 

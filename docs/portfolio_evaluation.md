@@ -1,6 +1,6 @@
 # Portfolio Evaluation
 
-Portfolio statistics are supplemental evidence from selected signals evaluated in the institutional backtest system used during the internship. The system evaluated daily holdings against stock returns; its precise execution-price convention and engine implementation are not part of this public repository. Transaction fees were not deducted. Because only a subset of signals entered this system, the rows below are not a controlled comparison across every prediction experiment.
+Portfolio statistics are supplemental evidence from selected signals evaluated in the historical backtest used for the reported portfolio analysis. The system evaluated daily holdings against stock returns; its precise execution-price convention and engine implementation are not part of this public repository. Transaction fees were not deducted. Because only a subset of signals entered this system, the rows below are not a controlled comparison across every prediction experiment.
 
 The source called its selected long leg `Top`. Its exact selection rule is not recoverable from the available export, so the public presentation uses the neutral name **Long portfolio**. This is distinct from prediction-evaluator **Top 5% / Top 10%**, which explicitly means the top fraction of each daily stock cross-section ranked by model score.
 
@@ -32,4 +32,4 @@ Among these representative backtests, the D512 intraday model has higher portfol
 
 The machine-readable version is [portfolio_results.csv](../results/portfolio/portfolio_results.csv). Date starts are source-reported boundaries: some exports begin at `2023-01-01`, while those with an explicit first trading date begin at `2023-01-03`.
 
-The institutional exports also contained style-exposure diagnostics. They are not published because the available images do not provide a sufficiently self-contained public definition of the underlying factor model or structured data for interpretation.
+The historical backtest exports also contained style-exposure diagnostics. They are not published because the available images do not provide a sufficiently self-contained public definition of the underlying factor model or structured data for interpretation.
