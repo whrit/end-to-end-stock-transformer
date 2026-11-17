@@ -24,10 +24,17 @@ def seed_everything(seed: int, deterministic: bool = True) -> None:
 
 def resolve_device(requested: Any = None) -> torch.device:
     if requested is None:
-        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        if torch.cuda.is_available():
+            requested = "cuda"
+        elif torch.backends.mps.is_available():
+            requested = "mps"
+        else:
+            requested = "cpu"
     device = torch.device(requested)
-    if device.type not in ("cpu", "cuda"):
+    if device.type not in ("cpu", "cuda", "mps"):
         raise ValueError("canonical training supports CPU or CUDA")
     if device.type == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("CUDA was requested but is unavailable")
+    if device.type == "mps" and not torch.cuda.is_available():
+        raise RuntimeError("MPS was requested but is unavailable")
     return device
