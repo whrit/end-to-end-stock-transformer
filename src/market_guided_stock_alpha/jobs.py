@@ -241,6 +241,9 @@ class Agent(object):
             time.sleep(HEARTBEAT_SECONDS)
 
     def run_forever(self) -> None:
+        # Job folders hold a full locked environment (~5 GB); left over from a crash
+        # or an older agent they fill the instance disk, so start from an empty workdir.
+        shutil.rmtree(str(self.workdir), ignore_errors=True)
         threading.Thread(target=self._heartbeat_loop, daemon=True).start()
         print("agent {} on {} watching {}".format(self.name, self.gpu, self.store.root), flush=True)
         while True:
@@ -276,14 +279,14 @@ class Agent(object):
         self.state, self.job = "running", job_id
         self.heartbeat()
         root = self.workdir / job_id
-        shutil.rmtree(str(root), ignore_errors=True)
-        root.mkdir(parents=True)
         log_path = root / "job.log"
         started = now_iso()
-        self._state(job_id, "running", started_at=started)
         exit_code = None
         versions: Optional[Dict[str, Any]] = None
         try:
+            self._state(job_id, "running", started_at=started)
+            shutil.rmtree(str(root), ignore_errors=True)
+            root.mkdir(parents=True)
             self.store.get_file("{}/code.tar.gz".format(job_id), root / "code.tar.gz")
             with tarfile.open(str(root / "code.tar.gz")) as archive:
                 if hasattr(tarfile, "data_filter"):
@@ -310,19 +313,28 @@ class Agent(object):
                         last_upload = time.monotonic()
                 exit_code = process.returncode
         except Exception as error:
-            with open(str(log_path), "a", encoding="utf-8") as log:
-                log.write("agent error: {}\n".format(error))
-        if log_path.exists():
-            self.store.put_file("{}/job.log".format(job_id), log_path)
-        # Exit codes from progress.run_main: 0 done, 3 stopped (resumable), else failed.
-        state = {0: "done", 3: "stopped"}.get(exit_code, "failed")
-        self._state(
-            job_id, state, started_at=started, ended_at=now_iso(), exit_code=exit_code,
-            environment=versions,
-        )
-        print("job {} {} (exit {})".format(job_id, state, exit_code), flush=True)
-        self.state, self.job = "idle", None
-        self.heartbeat()
+            # The local disk may be the problem (full), so the error goes to the queue too.
+            print("job {} agent error: {}".format(job_id, error), file=sys.stderr, flush=True)
+            try:
+                with open(str(log_path), "a", encoding="utf-8") as log:
+                    log.write("agent error: {}\n".format(error))
+            except OSError:
+                self.store.put_text("{}/agent_error.txt".format(job_id), "agent error: {}\n".format(error))
+        finally:
+            try:
+                if log_path.exists():
+                    self.store.put_file("{}/job.log".format(job_id), log_path)
+                # Exit codes from progress.run_main: 0 done, 3 stopped (resumable), else failed.
+                state = {0: "done", 3: "stopped"}.get(exit_code, "failed")
+                self._state(
+                    job_id, state, started_at=started, ended_at=now_iso(), exit_code=exit_code,
+                    environment=versions,
+                )
+                print("job {} {} (exit {})".format(job_id, state, exit_code), flush=True)
+            finally:
+                shutil.rmtree(str(root), ignore_errors=True)  # results are on R2; free the disk
+                self.state, self.job = "idle", None
+                self.heartbeat()
 
     @staticmethod
     def _environment_report(root: Path, environment: Dict[str, str], log: Any) -> Optional[Dict[str, Any]]:
