@@ -33,6 +33,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+# Runs inside the job's locked environment; its JSON goes to job.log and state.json.
+ENVIRONMENT_REPORT = (
+    "import json, platform, torch; print(json.dumps({"
+    "'python': platform.python_version(), 'torch': torch.__version__, "
+    "'torch_cuda': torch.version.cuda, 'cudnn': torch.backends.cudnn.version(), "
+    "'cuda_available': torch.cuda.is_available(), "
+    "'gpu': torch.cuda.get_device_name(0) if torch.cuda.is_available() else None}))"
+)
 R2_SCHEME = "r2://"
 POLL_SECONDS = 15.0
 LOG_UPLOAD_SECONDS = 30.0
@@ -274,6 +282,7 @@ class Agent(object):
         started = now_iso()
         self._state(job_id, "running", started_at=started)
         exit_code = None
+        versions: Optional[Dict[str, Any]] = None
         try:
             self.store.get_file("{}/code.tar.gz".format(job_id), root / "code.tar.gz")
             with tarfile.open(str(root / "code.tar.gz")) as archive:
@@ -287,6 +296,8 @@ class Agent(object):
             environment["PYTHONUNBUFFERED"] = "1"
             command = job_command(job)
             with open(str(log_path), "ab") as log:
+                versions = self._environment_report(root, environment, log)
+                self._state(job_id, "running", started_at=started, environment=versions)
                 log.write("$ {}\n".format(" ".join(command)).encode("utf-8"))
                 log.flush()
                 process = subprocess.Popen(command, cwd=str(root), stdout=log, stderr=subprocess.STDOUT, env=environment)
@@ -305,10 +316,30 @@ class Agent(object):
             self.store.put_file("{}/job.log".format(job_id), log_path)
         # Exit codes from progress.run_main: 0 done, 3 stopped (resumable), else failed.
         state = {0: "done", 3: "stopped"}.get(exit_code, "failed")
-        self._state(job_id, state, started_at=started, ended_at=now_iso(), exit_code=exit_code)
+        self._state(
+            job_id, state, started_at=started, ended_at=now_iso(), exit_code=exit_code,
+            environment=versions,
+        )
         print("job {} {} (exit {})".format(job_id, state, exit_code), flush=True)
         self.state, self.job = "idle", None
         self.heartbeat()
+
+    @staticmethod
+    def _environment_report(root: Path, environment: Dict[str, str], log: Any) -> Optional[Dict[str, Any]]:
+        """Install the locked environment and log the torch/CUDA/GPU the job will use."""
+        command = ["uv", "run", "--frozen", "--all-extras", "python", "-c", ENVIRONMENT_REPORT]
+        log.write("$ environment check (uv.lock)\n".encode("utf-8"))
+        log.flush()
+        result = subprocess.run(command, cwd=str(root), capture_output=True, text=True, env=environment)
+        log.write((result.stdout + result.stderr).encode("utf-8"))
+        log.flush()
+        for line in reversed(result.stdout.splitlines()):
+            if line.startswith("{"):
+                try:
+                    return json.loads(line)
+                except ValueError:
+                    break
+        return None
 
 
 def main(argv: Optional[List[str]] = None) -> int:

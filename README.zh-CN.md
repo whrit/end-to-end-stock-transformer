@@ -357,6 +357,8 @@ uv run --env-file .env scripts/remote.py instances   # 你的 vast.ai 实例及�
 
 报价始终按价格从低到高排列。这些限制是 `scripts/remote.py` 中 vast.ai 部分开头的常量。
 
+实例使用与本机相同的 torch。任务会按 `uv.lock` 安装 torch 及其 CUDA 运行库（目前为 torch 2.15.0 + CUDA 13.2），因此容器镜像只需提供 GPU 访问。`rent` 使用 NVIDIA 的最小镜像 `nvidia/cuda:13.0.3-base-ubuntu24.04`，其中不含 torch 或 CUDA 库。每个任务会在 `job.log` 开头和 `state.json` 中记录实际使用的 Python、torch、CUDA、cuDNN 与 GPU。
+
 vast.ai 密钥读取自 `VAST_API_KEY` 或 `vastai` CLI 已保存的密钥。R2 密钥会作为环境变量传给实例；主机由第三方提供，建议使用仅限此 bucket 的 R2 token。若你在 vast.ai 网页上自行创建实例，先运行 `scripts/remote.py setup`，把打印出的环境变量和启动脚本填入模板。
 
 在本机上：

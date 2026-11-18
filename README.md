@@ -355,6 +355,8 @@ The picker always applies these rental limits; you can make them stricter but ne
 
 Offers are always listed cheapest first. The limits are constants at the top of the vast.ai section in `scripts/remote.py`.
 
+Instances run the same torch as your laptop. The job installs torch and its CUDA runtime from `uv.lock` (today torch 2.15.0 with CUDA 13.2), so the container image only needs to give access to the GPU. `rent` uses NVIDIA's minimal `nvidia/cuda:13.0.3-base-ubuntu24.04`, which has no torch or CUDA libraries of its own. Each job records the Python, torch, CUDA, cuDNN and GPU it actually ran with at the top of its `job.log` and in `state.json`.
+
 The vast.ai key comes from `VAST_API_KEY` or the `vastai` CLI's saved key. The R2 keys are passed to the instance as environment variables, and hosts are third parties, so a token limited to this bucket is best. If you create an instance yourself on the vast.ai website instead, run `scripts/remote.py setup` and paste the printed environment variables and start command into your template.
 
 From the laptop:

@@ -165,8 +165,9 @@ def cmd_setup(args: argparse.Namespace) -> int:
     )
     console.print(Panel(start, title="2 · on-start script (vast.ai template → On-start Script)", border_style="dodger_blue1"))
     console.print(
-        "Any CUDA image works (the GPU driver comes from the host; uv installs Python and CUDA torch). "
-        "Re-run [bold]remote.py setup[/] after changing jobs.py; instances pick it up on their next start."
+        "Image: [bold]{}[/] (no torch inside; the job installs the same torch + CUDA runtime as your uv.lock, "
+        "so pick an image whose CUDA version is ≤ the host's). "
+        "Re-run [bold]remote.py setup[/] after changing jobs.py; instances pick it up on their next start.".format(DEFAULT_IMAGE)
     )
     return 0
 
@@ -362,7 +363,11 @@ def cmd_pull(args: argparse.Namespace) -> int:
 # ------------------------------------------------------------------ vast.ai
 
 VAST_API = "https://console.vast.ai/api/v0"
-DEFAULT_IMAGE = "pytorch/pytorch:2.4.0-cuda12.4-cudnn9-runtime"
+# Minimal NVIDIA image: no torch or CUDA libraries of its own (the job installs
+# torch and its CUDA runtime from uv.lock), but it carries NVIDIA's container
+# settings. Its NVIDIA_REQUIRE_CUDA must not exceed the host driver floor
+# (MIN_HOST_CUDA), or containers refuse to start on allowed hosts.
+DEFAULT_IMAGE = "nvidia/cuda:13.0.3-base-ubuntu24.04"
 R2_VARIABLES = ("R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY")
 
 # Hard rental limits: prompts and flags may tighten them, never loosen them.
@@ -389,6 +394,17 @@ def _locked_cuda_major() -> float:
 
 
 MIN_HOST_CUDA = _locked_cuda_major()
+
+
+def _image_cuda(image: str) -> Optional[float]:
+    """CUDA major.minor of an ``nvidia/cuda:X.Y.Z-...`` image, else None."""
+    if not image.startswith("nvidia/cuda:"):
+        return None
+    parts = image.split(":", 1)[1].split("-", 1)[0].split(".")
+    try:
+        return float("{}.{}".format(parts[0], parts[1] if len(parts) > 1 else 0))
+    except ValueError:
+        return None
 
 
 def _country(offer: Dict[str, Any]) -> str:
@@ -620,6 +636,13 @@ def cmd_rent(args: argparse.Namespace) -> int:
         _checked_limits(args.max_price, args.min_network)
     except ValueError as error:
         raise SystemExit("error: {}".format(error))
+    image_cuda = _image_cuda(args.image)
+    if image_cuda is not None and image_cuda > MIN_HOST_CUDA:
+        raise SystemExit(
+            "error: image {} requires CUDA {} but hosts are only guaranteed CUDA {:.1f}".format(
+                args.image, image_cuda, MIN_HOST_CUDA
+            )
+        )
     filters: Dict[str, Any] = {
         "gpu": args.gpu, "gpus": args.gpus, "gpu_ram": args.min_vram,
         "max_price": args.max_price, "min_network": args.min_network,
