@@ -48,7 +48,9 @@ NYSE_AMEX_EXCHANGES = ("NYSE", "AMEX", "ARCA", "BATS")  # Alpaca exchange names
 PERFORMANCE_MAX_RAW_CLOSE = 1.0
 PERFORMANCE_DRAWDOWN_SESSIONS = 20
 PERFORMANCE_DRAWDOWN = 0.5
-MIN_IDENTITY_OVERLAP_DAYS = 5
+MIN_IDENTITY_OVERLAP_DAYS = 5  # ticker still prices the same company (FIGI check)
+MIN_SAME_COMPANY_DAYS = 20  # two membership spans are one company: shared days...
+SAME_COMPANY_AGREEMENT = 0.99  # ...and the share of them with identical raw closes
 DELISTING_COLUMNS = ("sec_code", "last_trade_date", "kind", "exchange", "delta", "exit_factor")
 
 FetchBars = Callable[[Sequence[str], Optional[pd.Timestamp], str], pd.DataFrame]
@@ -119,11 +121,36 @@ def episodes(members: pd.DataFrame, trading_days: Sequence[Any]) -> pd.DataFrame
     return frame.drop(columns="_pos").merge(spans, left_on="episode", right_index=True)
 
 
-def _signature(bars: pd.DataFrame) -> str:
-    ordered = bars.sort_values("trade_date")
-    payload = ordered["trade_date"].to_numpy(dtype="datetime64[ns]").astype("int64").tobytes()
-    payload += np.round(ordered["close"].to_numpy(dtype="float64"), 4).tobytes()
-    return hashlib.sha1(payload).hexdigest()
+def _companies(raw: pd.DataFrame) -> pd.Series:
+    """episode -> company id: episodes whose raw closes agree on at least
+    ``SAME_COMPANY_AGREEMENT`` of their shared days (and share at least
+    ``MIN_IDENTITY_OVERLAP_DAYS``) are the same company, transitively.
+
+    Not a hash of the whole history: the same company read as of different
+    dates can cover different ranges (Dr Pepper Snapple listed as KDP).
+    """
+    rows = raw.loc[:, ["episode", "trade_date", "close"]].copy()
+    rows["price"] = np.round(rows["close"].to_numpy(dtype="float64"), 4)
+    # Candidate pairs: episodes printing the same price on the same day.
+    hits = rows.merge(rows, on=["trade_date", "price"])
+    hits = hits.loc[hits["episode_x"] < hits["episode_y"]]
+    pairs = hits.groupby(["episode_x", "episode_y"]).size()
+    parent = {int(e): int(e) for e in rows["episode"].unique()}
+
+    def root(e: int) -> int:
+        while parent[e] != e:
+            parent[e] = parent[parent[e]]
+            e = parent[e]
+        return e
+
+    days = rows.groupby("episode")["trade_date"].apply(set)
+    for (a, b), matched in pairs.items():
+        if matched < MIN_SAME_COMPANY_DAYS:
+            continue
+        shared = len(days[a] & days[b])
+        if matched >= SAME_COMPANY_AGREEMENT * shared:
+            parent[root(int(a))] = root(int(b))
+    return pd.Series({e: root(e) for e in parent}, name="company")
 
 
 def _same_prices(left: pd.DataFrame, right: pd.DataFrame) -> bool:
@@ -187,19 +214,22 @@ def build_sp500_universe(
 
     # 1. Company identity: raw bars per episode, read as of its last member day.
     raw_by_episode = _fetch_by_asof(fetch_bars, spans, "episode", "raw", "S&P members (raw, as of)")
-    signatures = (
-        raw_by_episode.groupby("episode").apply(_signature, include_groups=False)
-        if len(raw_by_episode) else pd.Series(dtype=object)
-    )
-    priced = spans.loc[spans["episode"].isin(signatures.index)].copy()
-    priced["company"] = priced["episode"].map(signatures)
+    companies = _companies(raw_by_episode) if len(raw_by_episode) else pd.Series(dtype="int64")
+    priced = spans.loc[spans["episode"].isin(companies.index)].copy()
+    priced["company"] = priced["episode"].map(companies)
+    # The latest span names the company (its ticker decides the FIGI); the span
+    # with the longest history prices it.
     representative = (
         priced.sort_values(["company", "last_date", "episode"]).groupby("company").tail(1).set_index("company")
     )
-    company_raw = raw_by_episode.loc[raw_by_episode["episode"].isin(representative["episode"])].copy()
-    company_raw["company"] = company_raw["episode"].map(
-        pd.Series(representative.index, index=representative["episode"])
+    lengths = raw_by_episode.groupby("episode").size()
+    widest = (
+        priced.assign(bars=priced["episode"].map(lengths))
+        .sort_values(["company", "bars", "last_date", "episode"])
+        .groupby("company").tail(1).set_index("company")
     )
+    company_raw = raw_by_episode.loc[raw_by_episode["episode"].isin(widest["episode"])].copy()
+    company_raw["company"] = company_raw["episode"].map(pd.Series(widest.index, index=widest["episode"]))
 
     # 2. FIGIs: current members by ticker; removed ones only when verifiable.
     #    ``literal`` = every bar ever printed under the ticker (any holder).
@@ -251,10 +281,22 @@ def build_sp500_universe(
             figi if figi else "{}.US.{:%Y%m%d}".format(ticker, last_bar[company]),
             "S&P 500 company {}".format(ticker),
         )
+    clash = pd.Series(codes)
+    clash = clash[clash.duplicated(keep=False)]
+    if len(clash):
+        raise DataQualityError(
+            "several S&P 500 companies share code {}: spans {}".format(
+                clash.iloc[0],
+                ", ".join(
+                    "{}..{} {}".format(r.first_date.date(), r.last_date.date(), r.ticker)
+                    for r in priced.loc[priced["company"].isin(clash[clash == clash.iloc[0]].index)].itertuples()
+                ),
+            )
+        )
 
-    # 3. Adjusted bars per company, as of its representative episode.
+    # 3. Adjusted bars per company, as of its widest-history span.
     adjusted = _fetch_by_asof(
-        fetch_bars, representative.reset_index(), "company", "all", "S&P members (adjusted, as of)"
+        fetch_bars, widest.reset_index(), "company", "all", "S&P members (adjusted, as of)"
     )
     adjusted["alpaca_symbol"] = adjusted.pop("company").map(codes)
     raw = company_raw.drop(columns=["episode"]).copy()

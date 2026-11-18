@@ -22,7 +22,7 @@ def prices(name, first, last):
     """Bars for one company on DAYS[first..last]; BUST collapses at the end."""
     span = DAYS[first:last + 1]
     base = {"A": 100.0, "C1": 300.0, "GONE": 50.0, "REUSE": 10.0, "BIG": 80.0, "BUST": 40.0, "ACQ": 60.0}[name]
-    close = np.full(len(span), base) + np.arange(len(span)) * 0.01
+    close = np.full(len(span), base) + np.arange(first, last + 1) * 0.01
     if name == "BUST":
         close[-5:] = [30.0, 20.0, 12.0, 8.0, 5.0]
     return pd.DataFrame({"trade_date": span, "open": close, "high": close, "low": close, "close": close,
@@ -38,7 +38,9 @@ def resolve(symbol, asof):
     the company through renames; None = every bar printed under the symbol."""
     whole = lambda company: [(company,) + SPANS[company]]
     if symbol == "OLD":
-        return whole("C1") if asof is not None else [("C1", 0, 9)]
+        # As of its old name the company reads a shorter history (like KDP for
+        # Dr Pepper Snapple): same prices on shared days, different coverage.
+        return [("C1", 3, 29)] if asof is not None else [("C1", 0, 9)]
     if symbol == "NEW":
         return whole("C1") if asof is not None else [("C1", 10, 29)]
     if symbol == "GONE":
