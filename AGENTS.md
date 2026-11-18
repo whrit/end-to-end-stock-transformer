@@ -145,6 +145,7 @@ There is no linter or formatter configured. Match the surrounding style.
   - `docs/intraday_features.md` ↔ intraday registry (test-enforced)
   - `docs/data_contract.md` ↔ `data/contracts.py`
   - `docs/reproducibility.md` ↔ checkpoint/rolling semantics
+  - `docs/us_phase2_plan.md`: the US roadmap (survivorship, delisting returns, tuning, 390-bar intraday). Update its status when an item lands
   - `README.md` and `README.zh-CN.md`: update both together
 
 ## Runtime/Tooling Preferences

@@ -299,7 +299,7 @@ uv run --env-file .env scripts/build_daily_features.py us_market63 --input $R/ra
 uv run --env-file .env scripts/run_rolling.py configs/us/stage1/master_d512_us_market63.json --resume
 ```
 
-R2 outputs are immutable: a script refuses to overwrite an existing location, so write each new data version to a new prefix (e.g. `us/v2`). The shipped US configs use the bucket `stock-transformer-data`; edit the `r2://` paths if your bucket has another name. The US profile currently covers Stage 1 (daily features). The 390-bar intraday features are Phase 2.
+R2 outputs are immutable: a script refuses to overwrite an existing location, so write each new data version to a new prefix (e.g. `us/v2`). The shipped US configs use the bucket `stock-transformer-data`; edit the `r2://` paths if your bucket has another name. The US profile currently covers Stage 1 (daily features). Remaining work (survivorship, delisting returns, US tuning, and the 390-bar intraday features) is planned in [docs/us_phase2_plan.md](docs/us_phase2_plan.md).
 
 ### Custom Experiment Configuration
 
