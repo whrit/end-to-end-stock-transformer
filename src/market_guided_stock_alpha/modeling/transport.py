@@ -10,6 +10,11 @@ import torch
 from market_guided_stock_alpha.dataset.dataset import SequenceSample
 
 
+def _raw_label_device(target: torch.device) -> torch.device:
+    # MPS has no float64: keep exact raw labels on CPU; consumers move them as float32.
+    return torch.device("cpu") if target.type == "mps" else target
+
+
 @dataclass(frozen=True)
 class DateBatch:
     """Exactly one prediction date and its complete dynamic cross-section."""
@@ -64,7 +69,7 @@ def adapt_sequence_sample(
         labels_raw=torch.as_tensor(
             np.array(sample.labels_raw, dtype="float64", order="C", copy=True),
             dtype=torch.float64,
-            device=target,
+            device=_raw_label_device(target),
         ),
         label_mask=torch.as_tensor(
             np.array(sample.label_mask, dtype="bool", order="C", copy=True),
@@ -86,7 +91,7 @@ def move_date_batch(batch: DateBatch, device: Any) -> DateBatch:
         stock_features=batch.stock_features.to(target),
         market_features=batch.market_features.to(target),
         labels=batch.labels.to(target),
-        labels_raw=batch.labels_raw.to(target),
+        labels_raw=batch.labels_raw.to(_raw_label_device(target)),
         label_mask=batch.label_mask.to(target),
         stock_mask=batch.stock_mask.to(target),
         intraday_market_features=(

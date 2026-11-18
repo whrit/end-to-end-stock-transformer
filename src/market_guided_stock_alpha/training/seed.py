@@ -32,9 +32,9 @@ def resolve_device(requested: Any = None) -> torch.device:
             requested = "cpu"
     device = torch.device(requested)
     if device.type not in ("cpu", "cuda", "mps"):
-        raise ValueError("canonical training supports CPU or CUDA")
+        raise ValueError("canonical training supports CPU, CUDA, or MPS")
     if device.type == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("CUDA was requested but is unavailable")
-    if device.type == "mps" and not torch.cuda.is_available():
+    if device.type == "mps" and not torch.backends.mps.is_available():
         raise RuntimeError("MPS was requested but is unavailable")
     return device

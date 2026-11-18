@@ -88,6 +88,7 @@ def _rng_state() -> Dict[str, Any]:
         "numpy_random_state": np.random.get_state(),
         "torch_cpu_rng_state": torch.get_rng_state(),
         "cuda_rng_state": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
+        "mps_rng_state": torch.mps.get_rng_state() if torch.backends.mps.is_available() else None,
     }
 
 
@@ -97,6 +98,8 @@ def _restore_rng_state(payload: Mapping[str, Any]) -> None:
     torch.set_rng_state(payload["torch_cpu_rng_state"])
     if payload.get("cuda_rng_state") is not None and torch.cuda.is_available():
         torch.cuda.set_rng_state_all(payload["cuda_rng_state"])
+    if payload.get("mps_rng_state") is not None and torch.backends.mps.is_available():
+        torch.mps.set_rng_state(payload["mps_rng_state"])
 
 
 def _torch_load(path: Path) -> Dict[str, Any]:

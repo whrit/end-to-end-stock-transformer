@@ -162,7 +162,9 @@ class MaskedListFoldLoss(nn.Module):
         order = tie_order[torch.argsort(target[tie_order], descending=True, stable=True)]
         if count % 2:
             order = torch.cat((order[:pair_count], order[-pair_count:]))
-        scores = prediction[order].double()
+        # MPS has no float64; fall back to float32 there (log-sum-exp is shift-stabilized).
+        compute_dtype = torch.float32 if prediction.device.type == "mps" else torch.float64
+        scores = prediction[order].to(dtype=compute_dtype)
         active_total = int(scores.numel())
         starts = torch.arange(pair_count, device=scores.device, dtype=torch.long)
         ends = active_total - starts
@@ -182,7 +184,7 @@ class MaskedListFoldLoss(nn.Module):
             + torch.log(negative_sums)
             + negative_shift
         )
-        active_counts = (ends - starts).to(dtype=torch.float64)
+        active_counts = (ends - starts).to(dtype=compute_dtype)
         diagonal_fraction = active_counts * torch.exp(-log_product)
         log_denominator = log_product + torch.log1p(-diagonal_fraction)
         differences = scores[starts] - scores[ends - 1]

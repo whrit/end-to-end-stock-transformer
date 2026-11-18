@@ -13,7 +13,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("config", type=Path, help="JSON experiment config")
     parser.add_argument("--resume", action="store_true", help="skip verified completed targets")
-    parser.add_argument("--device", default=None, help="torch device, for example cpu or cuda")
+    parser.add_argument(
+        "--device",
+        default=None,
+        help="torch device: cpu, cuda, or mps (default: auto-select cuda > mps > cpu)",
+    )
     return parser
 
 

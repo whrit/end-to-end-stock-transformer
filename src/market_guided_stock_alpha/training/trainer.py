@@ -44,7 +44,7 @@ class Trainer:
             predictions,
             batch.labels,
             batch.label_mask,
-            batch.labels_raw.to(dtype=predictions.dtype),
+            batch.labels_raw.to(device=predictions.device, dtype=predictions.dtype),
         )
         loss = result.get("loss")
         if (

@@ -234,5 +234,37 @@ class TrainingAndCheckpointTest(unittest.TestCase):
                 self.assertTrue(np.isfinite(output["train_loss"]))
 
 
+@unittest.skipUnless(torch.backends.mps.is_available(), "MPS is not available")
+class MPSTrainingTest(unittest.TestCase):
+    def test_every_loss_trains_validates_and_checkpoints_on_mps(self):
+        layout = FeatureLayout.stage1()
+        preprocessing = preprocessing_to_dict(identity_statistics(layout))
+        for name in ("mse", "ccc", "listfold", "rpl", "rsr"):
+            with self.subTest(loss=name), tempfile.TemporaryDirectory() as directory:
+                config = TrainingConfig(
+                    epochs=1,
+                    loss=LossConfig(name=name, minimum_count=2),
+                    early_stopping=EarlyStoppingConfig(
+                        enabled=False, patience=1, minimum_epochs=1
+                    ),
+                    seed=7,
+                )
+                model = MasterModel.from_layout(
+                    layout, d_model=16, temporal_heads=4, spatial_heads=2, dropout=0.0
+                )
+                manager = CheckpointManager(
+                    Path(directory),
+                    CheckpointContract.from_components(model, config, layout, preprocessing),
+                )
+                trainer = Trainer(model, config, device="mps", checkpoint_manager=manager)
+                result = trainer.fit(
+                    WholeDateLoader(TinyDataset(layout, 2), shuffle=True, seed=7),
+                    WholeDateLoader(TinyDataset(layout, 1), device="mps"),
+                )
+                self.assertEqual(result["best_epoch"], 1)
+                self.assertEqual(next(model.parameters()).device.type, "mps")
+                manager.load(Path(directory) / "last.pt", model, restore_rng=True)
+
+
 if __name__ == "__main__":
     unittest.main()
