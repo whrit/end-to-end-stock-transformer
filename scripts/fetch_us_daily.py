@@ -11,11 +11,12 @@ from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Sequence
 
 import pandas as pd
+from rich.console import Group
 from rich.table import Table
 from rich.text import Text
 
 from market_guided_stock_alpha.artifacts import atomic_write_json, sha256_path
-from market_guided_stock_alpha.progress import board, note
+from market_guided_stock_alpha.progress import board, kv_table, note, run_main
 from market_guided_stock_alpha.storage import is_remote, publish, r2_client_from_env
 from market_guided_stock_alpha.us_data.alpaca import (
     NEW_YORK,
@@ -102,6 +103,7 @@ STAGES = (
     "build canonical tables",
     "write tables",
 )
+QUALITY: Dict[str, Any] = {}
 
 
 def _stage(index: int, text: str) -> None:
@@ -113,7 +115,7 @@ def _stage(index: int, text: str) -> None:
             table.add_row(Text("▶", style="bold dodger_blue1"), Text(name, style="bold"))
         else:
             table.add_row(Text("·", style="dim"), Text(name, style="dim"))
-    board(table, "FETCH STAGES")
+    board(Group(table, kv_table(QUALITY, title="data quality")) if QUALITY else table, "FETCH")
     note(("━━ {}/{} ".format(index, len(STAGES)), "bold dodger_blue1"), (text, "bold"))
 
 
@@ -169,16 +171,43 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     _stage(2, "mapping {:,} tickers through OpenFIGI".format(assets["alpaca_symbol"].nunique()))
     figi = map_tickers(sorted(set(assets["alpaca_symbol"])), secrets["OPENFIGI_API_KEY"])
     securities, counts = build_securities(assets, figi)
+    QUALITY.update(
+        {
+            "tickers seen": counts.get("symbols", 0),
+            "mapped to FIGI": counts.get("mapped", 0),
+            "unmapped": counts.get("unmapped", 0),
+            "ambiguous FIGI (excluded)": counts.get("ambiguous_figi", 0),
+            "excluded: not common stock": counts.get("excluded_by_type", 0),
+            "common stocks": counts.get("common_stocks", 0),
+        }
+    )
     symbols = sorted(set(securities["alpaca_symbol"]) | set(MARKET84_ETFS))
     _stage(3, "fetching daily bars for {:,} symbols (adjusted, then raw)".format(len(symbols)))
     adjusted = fetch_daily_bars(data, symbols, start, end, "all")
     raw = fetch_daily_bars(data, symbols, start, end, "raw")
+    QUALITY.update(
+        {
+            "symbols with bars": int(adjusted["alpaca_symbol"].nunique()),
+            "symbols without bars": len(symbols) - int(adjusted["alpaca_symbol"].nunique()),
+            "bar rows": len(adjusted),
+        }
+    )
     _stage(4, "fetching trading calendar")
     trading_days = fetch_trading_days(trading, start, end)
     _stage(5, "building canonical tables")
     tables = build_us_tables(
         securities, adjusted, raw, trading_days, start, end,
         min_price=args.min_price, min_dollar_volume=args.min_dollar_volume,
+    )
+    stock = tables["daily_stock"]
+    numeric = stock.select_dtypes("number")
+    QUALITY.update(
+        {
+            "daily_stock rows": len(stock),
+            "missing numeric values": float(numeric.isna().to_numpy().mean()) if numeric.size else 0.0,
+            "membership rows": len(tables["membership"]),
+            "membership securities": int(tables["membership"]["sec_code"].nunique()),
+        }
     )
     counts.update(
         {
@@ -222,9 +251,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             staged = Path(workdir) / "raw"
             _write_tables(tables, manifest, staged)
             os.replace(str(staged), str(local_output))
+    note(kv_table(QUALITY, title="data quality"))
     print(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True))
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(run_main(main))

@@ -10,6 +10,8 @@ from typing import Any, Dict, Optional, Sequence
 
 
 from market_guided_stock_alpha.artifacts import sha256_path
+from market_guided_stock_alpha.derived.artifact import artifact_quality
+from market_guided_stock_alpha.progress import board, kv_table, note, run_main
 from market_guided_stock_alpha.data.io import read_table
 from market_guided_stock_alpha.derived.builders import (
     ALPHA158_DTYPES,
@@ -121,10 +123,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         manifest = BUILDERS[args.family](
             read_table(source_path), output, provenance=provenance, **options
         )
+        quality = artifact_quality(output)
+        board(kv_table(quality), "BUILD QUALITY")
+        note(kv_table(quality, title="build quality"))
         publish(output, args.output)
     print(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True))
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(run_main(main))

@@ -200,6 +200,29 @@ def write_feature_artifact(
             shutil.rmtree(temporary)
 
 
+def artifact_quality(path: Path) -> Dict[str, Any]:
+    """Coverage and missing-value share of a written artifact (read-only).
+
+    Uses the stored ``source_observed`` and ``feature_finite_count`` arrays, so
+    no feature values are scanned.
+    """
+    manifest = json.loads((Path(path) / "manifest.json").read_text(encoding="utf-8"))
+    observed = np.load(Path(path) / "source_observed.npy", mmap_mode="r")
+    finite = np.load(Path(path) / "feature_finite_count.npy", mmap_mode="r")
+    features = int(manifest["feature_count"])
+    observed_rows = int(np.count_nonzero(observed))
+    finite_values = int(np.asarray(finite, dtype="int64")[np.asarray(observed, dtype="bool")].sum())
+    return {
+        "family": manifest["family"],
+        "dates": "{} → {} ({:,})".format(manifest["date_start"], manifest["date_end"], manifest["date_count"]),
+        "securities": int(manifest["security_count"]) if manifest.get("security_count") else 0,
+        "features": features,
+        "observed rows": observed_rows,
+        "observed share": observed_rows / max(int(observed.size), 1),
+        "missing values (observed rows)": 1.0 - finite_values / max(observed_rows * features, 1),
+    }
+
+
 def read_feature_artifact(
     path: Path,
     expected_family: Optional[str] = None,

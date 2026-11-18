@@ -187,6 +187,7 @@ class Trainer:
                 ("  ★ new best" if improved else "  best {:.4f} @ {}".format(best_metric, best_epoch),
                  "green" if improved else "dim"),
                 ("  {:.0f}s".format(time.monotonic() - started), "cyan"),
+                detail=True,
             )
             if self.checkpoints is not None and (
                 epoch % self.config.checkpoint_every == 0 or improved

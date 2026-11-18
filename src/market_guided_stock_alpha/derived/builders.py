@@ -1,6 +1,9 @@
 """Direct canonical-DataFrame to derived-feature artifact builders."""
 
+import contextlib
+import io
 import os
+import warnings
 import shutil
 import tempfile
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
@@ -19,7 +22,7 @@ from market_guided_stock_alpha.data.contracts import (
 )
 from market_guided_stock_alpha.data.minute_session import normalize_minute_session
 from market_guided_stock_alpha.derived.artifact import write_feature_artifact
-from market_guided_stock_alpha.progress import progress
+from market_guided_stock_alpha.progress import note, progress
 from market_guided_stock_alpha.derived.specs import (
     alpha158_spec,
     intraday_market_spec,
@@ -71,23 +74,64 @@ def _write_alpha158_batch(
     batch: pd.DataFrame,
     dates: np.ndarray,
     codes: Tuple[str, ...],
-) -> None:
+) -> Tuple[int, int, Dict[str, int]]:
     """Compute one security batch and write it into the shared .npy memmap.
 
     Batches own disjoint security columns, so concurrent writers never touch
     the same bytes. Module-level so a spawned worker process can import it.
+
+    Returns ``(nan_count, value_count, messages)``: warnings and stderr text
+    raised in the batch are captured and returned (message -> count) so the
+    parent can log them, instead of a worker writing into the dashboard.
     """
-    generator = Alpha158Generator(alpha158_spec())
-    features = generator.transform_market_history(batch)
+    messages: Dict[str, int] = {}
+    captured = io.StringIO()
+    with contextlib.redirect_stderr(captured), warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        generator = Alpha158Generator(alpha158_spec())
+        features = generator.transform_market_history(batch)
+        block = features.loc[:, generator.get_feature_names()].to_numpy(dtype="float64")
+    for item in caught:
+        key = "{}: {}".format(item.category.__name__, item.message)
+        messages[key] = messages.get(key, 0) + 1
+    for line in captured.getvalue().splitlines():
+        if line.strip():
+            messages[line.strip()] = messages.get(line.strip(), 0) + 1
     values = np.lib.format.open_memmap(values_path, mode="r+")
     values[
         pd.DatetimeIndex(dates).get_indexer(features["trade_date"]),
         pd.Index(codes).get_indexer(features["sec_code"]),
-    ] = features.loc[:, generator.get_feature_names()].to_numpy(
-        dtype="float64"
-    ).astype(values.dtype, copy=False)
+    ] = block.astype(values.dtype, copy=False)
     values.flush()
     del values
+    return int(np.isnan(block).sum()), int(block.size), messages
+
+
+class _BatchReport(object):
+    """Folds batch results into the alpha158 bar: NaN share and new warnings."""
+
+    def __init__(self, bar: Any) -> None:
+        self.bar = bar
+        self.nan = 0
+        self.values = 0
+        self.messages: Dict[str, int] = {}
+
+    def add(self, count: int, result: Tuple[int, int, Dict[str, int]]) -> None:
+        nan, total, messages = result
+        self.nan += nan
+        self.values += total
+        for message, times in messages.items():
+            if message not in self.messages:
+                note(("⚠ worker: ", "bold yellow"), (message, "yellow"))
+            self.messages[message] = self.messages.get(message, 0) + times
+        self.bar.update(count)
+        self.bar.set_postfix_str("NaN {:.2%}".format(self.nan / max(self.values, 1)))
+
+    def close(self) -> None:
+        self.bar.close()
+        for message, times in sorted(self.messages.items(), key=lambda item: -item[1]):
+            if times > 1:
+                note(("⚠ worker warning repeated ×{:,}: ".format(times), "yellow"), (message, "dim"))
 
 
 def build_alpha158_artifact(
@@ -173,11 +217,10 @@ def build_alpha158_artifact(
             )
             for start in range(0, len(codes), batch_securities)
         )
-        bar = progress(total=len(codes), desc="alpha158", unit="stock")
+        report = _BatchReport(progress(total=len(codes), desc="alpha158", unit="stock"))
         if workers == 1:
             for count, batch in batches:
-                _write_alpha158_batch(values_path, batch, date_values, codes)
-                bar.update(count)
+                report.add(count, _write_alpha158_batch(values_path, batch, date_values, codes))
         else:
             # Bound queued batches so the parent never holds a second full
             # copy of the input as pending task arguments.
@@ -190,19 +233,17 @@ def build_alpha158_artifact(
                         if len(in_flight) >= 2 * workers:
                             done, _ = wait(in_flight, return_when=FIRST_COMPLETED)
                             for future in done:
-                                future.result()
-                                bar.update(in_flight.pop(future))
+                                report.add(in_flight.pop(future), future.result())
                         future = pool.submit(
                             _write_alpha158_batch, values_path, batch, date_values, codes
                         )
                         in_flight[future] = count
                     for future in list(in_flight):
-                        future.result()
-                        bar.update(in_flight.pop(future))
+                        report.add(in_flight.pop(future), future.result())
                 except BaseException:
                     pool.shutdown(wait=True, cancel_futures=True)
                     raise
-        bar.close()
+        report.close()
         extra = dict(provenance or {})
         if storage:
             extra["alpha158_storage"] = storage

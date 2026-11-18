@@ -4,9 +4,10 @@ from dataclasses import replace
 import json
 from pathlib import Path
 import tempfile
-from typing import Any, Dict, Mapping, Tuple
+from typing import Any, Dict, Mapping, Optional, Tuple
 
 from market_guided_stock_alpha import storage
+from market_guided_stock_alpha.progress import note, status_to
 from market_guided_stock_alpha.data.calendar import TradingCalendar
 from market_guided_stock_alpha.data.io import read_table
 from market_guided_stock_alpha.dataset.layout import FeatureLayout
@@ -239,16 +240,50 @@ def load_experiment_config(path: Path) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     return document, validate_experiment_config(document)
 
 
+class _ReferenceRun(object):
+    """Lazy ``metrics.json`` lookups in an earlier run (local dir or r2://).
+
+    Feeds the blotter's Δ column only; a missing reference never fails a run.
+    """
+
+    def __init__(self, location: str, cache: Path) -> None:
+        self.root = str(location).rstrip("/")
+        self.name = self.root.rsplit("/", 1)[-1]
+        self.cache = cache
+        self.found: Dict[Tuple[int, str], Optional[Dict[str, Any]]] = {}
+        config = self._read("config.json")
+        self.seeds = [] if config is None else [int(seed) for seed in config.get("seeds", [])]
+        if config is None:
+            note(("⚠ reference run not found at {}; Δ column stays empty".format(self.root), "yellow"))
+
+    def _read(self, relative: str) -> Optional[Dict[str, Any]]:
+        try:
+            path = storage.materialize(
+                "{}/{}".format(self.root, relative), Path.cwd(), self.cache, quiet=True
+            )
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, OSError, ValueError):
+            return None
+
+    def __call__(self, seed: int, target_id: str) -> Optional[Dict[str, Any]]:
+        key = (int(seed), str(target_id))
+        if key not in self.found:
+            use = key[0] if key[0] in self.seeds or not self.seeds else self.seeds[0]
+            self.found[key] = self._read("seed_{}/target_{}/metrics.json".format(use, key[1]))
+        return self.found[key]
+
+
 def run_from_json_config(
     config_path: Path,
     resume_override: bool = False,
     device: Any = None,
+    compare: Optional[str] = None,
 ) -> Dict[str, Any]:
     source = Path(config_path)
     document, validated = load_experiment_config(source)
     with tempfile.TemporaryDirectory() as directory:
         return _run_document(
-            document, validated, source.parent, Path(directory), resume_override, device
+            document, validated, source.parent, Path(directory), resume_override, device, compare
         )
 
 
@@ -259,6 +294,7 @@ def _run_document(
     cache: Path,
     resume_override: bool,
     device: Any,
+    compare: Optional[str] = None,
 ) -> Dict[str, Any]:
     def resolve(value: Any) -> Path:
         return storage.materialize(value, base, cache)
@@ -312,8 +348,10 @@ def _run_document(
             intraday_market=intraday_market,
         )
 
+    reference = None if compare is None else _ReferenceRun(compare, cache / "reference")
+
     def execute(output_root: Path) -> Dict[str, Any]:
-        runner = RollingRunner(output_root, device)
+        runner = RollingRunner(output_root, device, reference)
         if document["model"]["family"] == "lightgbm":
             return runner.run_lightgbm(
                 run_config, targets, bundle, layout, validated["training"]
@@ -329,8 +367,11 @@ def _run_document(
 
     output_value = document.get("output_root", "runs")
     if not storage.is_remote(output_value):
-        return execute(resolve(output_value))
+        local_output = resolve(output_value)
+        status_to(local_output / run_config.experiment_name / "dashboard_status.json")
+        return execute(local_output)
     remote_root = str(output_value).rstrip("/")
+    status_to("{}/{}/dashboard_status.json".format(remote_root, run_config.experiment_name))
     local_root = cache / "output"
     if run_config.resume:
         try:

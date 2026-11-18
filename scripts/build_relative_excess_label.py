@@ -24,7 +24,7 @@ from market_guided_stock_alpha.labels.relative_excess_return import (
     build_relative_excess_label,
     formula_metadata,
 )
-from market_guided_stock_alpha.progress import note
+from market_guided_stock_alpha.progress import board, kv_table, note, run_main
 from market_guided_stock_alpha.storage import (
     is_remote,
     materialize,
@@ -211,9 +211,24 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         benchmark_code=args.benchmark_code,
         value_column=args.value_column,
     )
+    output = manifest["output"]
+    quality = {
+        "rows": output["row_count"],
+        "dates": "{} → {} ({:,})".format(output["date_start"], output["date_end"], output["date_count"]),
+        "securities": output["security_count"],
+        "NaN values": output["nan_count"],
+        "infinite values": output["infinite_count"],
+        "duplicate index rows": output["duplicate_index_count"],
+        "index sorted": output["index_sorted"],
+    }
+    for key, value in sorted(manifest.get("diagnostics", {}).items()):
+        if isinstance(value, (int, float, str, bool)):
+            quality[key.replace("_", " ")] = value
+    board(kv_table(quality), "LABEL QUALITY")
+    note(kv_table(quality, title="label quality"))
     print(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True))
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(run_main(main))

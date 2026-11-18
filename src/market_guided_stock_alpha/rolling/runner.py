@@ -2,12 +2,16 @@
 
 from dataclasses import dataclass
 import json
+import math
+import time
 from pathlib import Path
-from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
+import numpy as np
 import pandas as pd
 import torch
 from rich import box
+from rich.console import Group
 from rich.table import Table
 from rich.text import Text
 
@@ -30,7 +34,20 @@ from market_guided_stock_alpha.rolling.artifacts import (
     read_prediction_artifact,
     write_prediction_artifact,
 )
-from market_guided_stock_alpha.progress import board, header, note, progress, ticker
+from market_guided_stock_alpha.progress import (
+    StopRequested,
+    allow_stop,
+    board,
+    curves,
+    eta,
+    header,
+    log_to,
+    note,
+    progress,
+    stop_requested,
+    summary as summarize_job,
+    ticker,
+)
 from market_guided_stock_alpha.rolling.prediction import (
     predict_lightgbm_model,
     predict_neural_model,
@@ -123,7 +140,11 @@ def _selection(summary: Mapping[str, Any]) -> str:
 
 
 def _target_parts(
-    seed: int, target_id: str, summary: Mapping[str, Any], resumed: bool
+    seed: int,
+    target_id: str,
+    summary: Mapping[str, Any],
+    resumed: bool,
+    delta: Optional[float] = None,
 ) -> Tuple[Any, ...]:
     """One persistent log line per finished target (bars are transient)."""
     return (
@@ -139,7 +160,22 @@ def _target_parts(
         _metric(summary.get("ic")),
         ("  top10 ", "dim"),
         _metric(summary.get("top10")),
+        ("  Δ vs ref " if delta is not None else "", "dim"),
+        _metric(delta) if delta is not None else ("", ""),
     )
+
+
+# (seed, target_id) -> that target's metrics.json in a reference run, or None.
+Reference = Callable[[int, str], Optional[Mapping[str, Any]]]
+
+
+def _delta(reference: Optional[Reference], seed: int, target_id: str, summary: Mapping[str, Any]) -> Optional[float]:
+    if reference is None or summary.get("rank_ic") is None:
+        return None
+    other = reference(seed, target_id)
+    if other is None or other.get("rank_ic") is None:
+        return None
+    return float(summary["rank_ic"]) - float(other["rank_ic"])
 
 
 def _blotter(
@@ -148,8 +184,14 @@ def _blotter(
     done: Mapping[str, Mapping[str, Any]],
     current: Optional[str],
     overall: Optional[Mapping[str, Any]] = None,
+    reference: Optional[Reference] = None,
+    compact: bool = False,
 ) -> Table:
-    """Target blotter: status and test metrics for every target of one seed."""
+    """Target blotter: status and test metrics for every target of one seed.
+
+    ``compact`` (the live board) keeps rank IC and top10 only, so it fits half
+    the screen; the exit summary shows every metric.
+    """
     table = Table(
         title=None if overall is None else "seed {} · targets".format(seed),
         title_style="bold dodger_blue1",
@@ -157,28 +199,31 @@ def _blotter(
         border_style="grey37",
         box=box.SIMPLE_HEAD,
     )
-    for name, justify in (
-        ("target", "left"),
-        ("status", "left"),
-        ("best (valid)", "left"),
-        ("rank IC", "right"),
-        ("IC", "right"),
-        ("top5", "right"),
-        ("top10", "right"),
-    ):
-        table.add_column(name, justify=justify, no_wrap=True)
+    names = ("rank_ic", "top10") if compact else ("rank_ic", "ic", "top5", "top10")
+    labels = {"rank_ic": "rank IC", "ic": "IC", "top5": "top5", "top10": "top10"}
+    table.add_column("target", no_wrap=True)
+    table.add_column("status", no_wrap=True)
+    table.add_column("best (valid)", no_wrap=True)
+    for name in names:
+        table.add_column(labels[name], justify="right", no_wrap=True)
+    if reference is not None:
+        table.add_column("Δ rIC ref", justify="right", no_wrap=True)
 
-    def cells(row: Mapping[str, Any]) -> Sequence[Text]:
-        return [Text(*_metric(row.get(name))) for name in ("rank_ic", "ic", "top5", "top10")]
+    def cells(row: Mapping[str, Any]) -> List[Text]:
+        return [Text(*_metric(row.get(name))) for name in names]
 
     for target in targets:
         summary = done.get(target.target_id)
         if summary is not None:
-            table.add_row(
-                target.target_id, Text("DONE", style="green"), _selection(summary), *cells(summary)
-            )
+            row = [target.target_id, Text("DONE", style="green"), _selection(summary)] + cells(summary)
+            if reference is not None:
+                delta = _delta(reference, seed, target.target_id, summary)
+                row.append(Text(*_metric(delta)) if delta is not None else Text("—", style="dim"))
+            table.add_row(*row)
         elif target.target_id == current:
-            table.add_row(target.target_id, Text("TRAIN", style="bold yellow"), "", *[Text("···", style="dim")] * 4)
+            table.add_row(
+                target.target_id, Text("TRAIN", style="bold yellow"), "", *[Text("···", style="dim")] * len(names)
+            )
         else:
             table.add_row(Text(target.target_id, style="dim"), Text("QUEUED", style="dim"))
     if overall is not None:
@@ -189,24 +234,185 @@ def _blotter(
     return table
 
 
-def _show_progress(
-    seed: int,
+def _seed_matrix(
     targets: Sequence[RollingTarget],
-    summaries: Sequence[Mapping[str, Any]],
-    current: Optional[str],
-) -> None:
-    done = {str(summary["target_id"]): summary for summary in summaries}
-    board(_blotter(seed, targets, done, current), "TARGETS · seed {}".format(seed))
-    if summaries:
-        last = summaries[-1]
-        ticker(
-            "{}/{}".format(seed, last["target_id"]),
-            ("s{} {} ".format(seed, last["target_id"]), "bold"),
-            ("rIC ", "dim"),
-            _metric(last.get("rank_ic")),
-            ("  top10 ", "dim"),
-            _metric(last.get("top10")),
+    done: Mapping[int, Mapping[str, Mapping[str, Any]]],
+    seeds: Sequence[int],
+    ensemble: Mapping[str, Mapping[str, Any]],
+    ensemble_overall: Optional[Mapping[str, Any]] = None,
+) -> Table:
+    """Test rank IC per target across seeds: spread, and the ensemble once run."""
+    table = Table(
+        title="rank IC across seeds",
+        title_style="bold dodger_blue1",
+        header_style="bold dodger_blue1",
+        border_style="grey37",
+        box=box.SIMPLE_HEAD,
+    )
+    table.add_column("target", no_wrap=True)
+    for seed in seeds:
+        table.add_column("s{}".format(seed), justify="right", no_wrap=True)
+    for name in ("mean", "sd", "ensemble"):
+        table.add_column(name, justify="right", no_wrap=True)
+    for target in targets:
+        values = [done.get(int(seed), {}).get(target.target_id, {}).get("rank_ic") for seed in seeds]
+        finite = [float(value) for value in values if value is not None]
+        row: List[Any] = [target.target_id]
+        row += [Text(*_metric(value)) if value is not None else Text("·", style="dim") for value in values]
+        row.append(Text(*_metric(sum(finite) / len(finite))) if finite else Text("·", style="dim"))
+        row.append(
+            Text("{:.4f}".format(float(np.std(finite, ddof=1))), style="cyan") if len(finite) > 1 else Text("·", style="dim")
         )
+        member = ensemble.get(target.target_id)
+        row.append(Text(*_metric(member.get("rank_ic"))) if member else Text("·", style="dim"))
+        table.add_row(*row)
+    if ensemble_overall is not None:
+        table.add_section()
+        table.add_row(
+            Text("OVERALL", style="bold"), *[""] * (len(seeds) + 2), Text(*_metric(ensemble_overall.get("rank_ic")))
+        )
+    return table
+
+
+def _long_short_spread(frame: pd.DataFrame, fraction: float = 0.1) -> Dict[pd.Timestamp, float]:
+    """Daily top-minus-bottom decile mean raw label (dashboard display only)."""
+    spreads: Dict[pd.Timestamp, float] = {}
+    for day, group in frame.groupby("trade_date", sort=True):
+        prediction = group["prediction"].to_numpy(dtype="float64")
+        raw = group["label_raw"].to_numpy(dtype="float64")
+        mask = group["label_mask"].to_numpy(dtype="bool") & np.isfinite(prediction) & np.isfinite(raw)
+        if int(mask.sum()) < 10:
+            continue
+        ordered = raw[mask][np.argsort(prediction[mask], kind="mergesort")]
+        count = max(1, int(math.ceil(len(ordered) * fraction)))
+        spreads[pd.Timestamp(day)] = float(ordered[-count:].mean() - ordered[:count].mean())
+    return spreads
+
+
+class _RunMonitor(object):
+    """Dashboard side of a rolling run: blotter, equity, ETA, ticker, stop.
+
+    Display only: nothing here feeds back into training, predictions or the
+    metric files.
+    """
+
+    def __init__(
+        self,
+        config: RollingRunConfig,
+        targets: Sequence[RollingTarget],
+        run_root: Path,
+        reference: Optional[Reference],
+        fields: Sequence[Tuple[str, Any]],
+    ) -> None:
+        log_to(run_root / "dashboard.log")
+        allow_stop(True)
+        for key, value in fields:
+            header(key, value)
+        if reference is not None:
+            header("vs", getattr(reference, "name", "reference"))
+        self.config = config
+        self.targets = list(targets)
+        self.reference = reference
+        self.done: Dict[int, Dict[str, Mapping[str, Any]]] = {int(seed): {} for seed in config.seeds}
+        self.ensemble: Dict[str, Mapping[str, Any]] = {}
+        self.timings: List[Tuple[float, int]] = []
+        self.curve: List[Tuple[float, float]] = []
+        self.marks: List[int] = []
+        self.started = time.monotonic()
+        self.bar = progress(
+            total=len(config.seeds) * len(targets), desc=config.experiment_name, unit="target"
+        )
+
+    def start(self, seed: int, target: RollingTarget) -> None:
+        self.started = time.monotonic()
+        if not self.done[int(seed)]:
+            self.curve, self.marks = [], []
+        self.bar.set_postfix_str("seed {} · target {}".format(seed, target.target_id))
+        self._estimate(int(seed))
+        self._show(int(seed), target.target_id)
+
+    def finish(
+        self,
+        seed: int,
+        target: RollingTarget,
+        summary: Mapping[str, Any],
+        frame: pd.DataFrame,
+        resumed: bool,
+    ) -> None:
+        seed = int(seed)
+        if not resumed:
+            self.timings.append((time.monotonic() - self.started, max(len(target.train_dates), 1)))
+        self.done[seed][target.target_id] = summary
+        self.bar.update(1)
+        note(*_target_parts(seed, target.target_id, summary, resumed, _delta(self.reference, seed, target.target_id, summary)))
+        _summary, daily = evaluate_target(frame)
+        spreads = _long_short_spread(frame)
+        if self.curve:
+            self.marks.append(len(self.curve))
+        for day, value in zip(daily["trade_date"], daily["rank_ic"]):
+            spread = spreads.get(pd.Timestamp(day), 0.0)
+            self.curve.append((float(value) if np.isfinite(value) else 0.0, spread))
+        curves(
+            "EQUITY · seed {} · {} test days".format(seed, len(self.curve)),
+            [
+                ("Σ daily rank IC", np.cumsum([point[0] for point in self.curve]).tolist()),
+                ("Σ daily L/S decile spread (raw label)", np.cumsum([point[1] for point in self.curve]).tolist()),
+            ],
+            self.marks,
+        )
+        ticker(
+            "{}/{}".format(seed, target.target_id),
+            ("s{} {} ".format(seed, target.target_id), "bold"),
+            ("rIC ", "dim"),
+            _metric(summary.get("rank_ic")),
+            ("  top10 ", "dim"),
+            _metric(summary.get("top10")),
+        )
+        self._show(seed, None)
+        if stop_requested():
+            raise StopRequested(
+                "stopped after seed {} target {}; rerun with --resume to continue".format(seed, target.target_id)
+            )
+
+    def seed_done(self, seed: int, overall: Mapping[str, Any]) -> None:
+        note(_blotter(seed, self.targets, self.done[int(seed)], None, overall, self.reference))
+        summarize_job("seed {} rank IC {}".format(seed, _metric(overall.get("rank_ic"))[0]))
+
+    def ensemble_done(self, summaries: Sequence[Mapping[str, Any]], overall: Mapping[str, Any]) -> None:
+        self.ensemble = {str(item["target_id"]): item for item in summaries}
+        table = _seed_matrix(self.targets, self.done, self.config.seeds, self.ensemble, overall)
+        board(table, "SEEDS · ensemble")
+        note(table)
+        summarize_job("ensemble rank IC {}".format(_metric(overall.get("rank_ic"))[0]))
+
+    def close(self) -> None:
+        self.bar.close()
+        eta(None)
+
+    def _estimate(self, seed: int) -> None:
+        """ETA from seconds per training date of targets trained this session."""
+        if not self.timings:
+            eta(None)
+            return
+        rate = sum(seconds for seconds, _ in self.timings) / sum(dates for _, dates in self.timings)
+        seeds = [int(value) for value in self.config.seeds]
+        remaining = sum(
+            len(target.train_dates)
+            for later in seeds[seeds.index(seed):]
+            for target in self.targets
+            if target.target_id not in self.done[later]
+        )
+        eta(rate * remaining)
+
+    def _show(self, seed: int, current: Optional[str]) -> None:
+        table = _blotter(seed, self.targets, self.done[seed], current, None, self.reference, compact=True)
+        if len(self.config.seeds) > 1:
+            board(
+                Group(table, _seed_matrix(self.targets, self.done, self.config.seeds, self.ensemble)),
+                "TARGETS · seed {}".format(seed),
+            )
+        else:
+            board(table, "TARGETS · seed {}".format(seed))
 
 
 def _build_dataset(
@@ -234,9 +440,10 @@ def _build_dataset(
 class RollingRunner:
     """Train, predict, evaluate, aggregate, and ensemble one experiment."""
 
-    def __init__(self, output_root: Path, device: Any = None) -> None:
+    def __init__(self, output_root: Path, device: Any = None, reference: Optional[Reference] = None) -> None:
         self.output_root = Path(output_root)
         self.device = device
+        self.reference = reference
 
     def run(
         self,
@@ -265,18 +472,22 @@ class RollingRunner:
 
         seed_results: Dict[int, Dict[str, Any]] = {}
         prediction_by_seed: Dict[int, Dict[str, pd.DataFrame]] = {}
-        header("device", resolve_device(self.device))
-        header("plan", "{} seed × {} targets".format(len(config.seeds), len(targets)))
-        run_bar = progress(
-            total=len(config.seeds) * len(targets), desc=config.experiment_name, unit="target"
+        monitor = _RunMonitor(
+            config,
+            targets,
+            run_root,
+            self.reference,
+            [
+                ("device", resolve_device(self.device)),
+                ("plan", "{} seed × {} targets".format(len(config.seeds), len(targets))),
+            ],
         )
         for seed in config.seeds:
             previous_best: Optional[Path] = None
             target_summaries = []
             prediction_by_seed[int(seed)] = {}
             for target in targets:
-                run_bar.set_postfix_str("seed {} · target {}".format(seed, target.target_id))
-                _show_progress(seed, targets, target_summaries, target.target_id)
+                monitor.start(seed, target)
                 target_root = run_root / "seed_{}".format(seed) / "target_{}".format(target.target_id)
                 checkpoint_root = target_root / "checkpoints"
                 preprocessing_path = target_root / "preprocessing.json"
@@ -390,17 +601,15 @@ class RollingRunner:
                 previous_best = best_path
                 prediction_by_seed[int(seed)][target.target_id] = frame
                 target_summaries.append(summary)
-                run_bar.update(1)
-                note(*_target_parts(seed, target.target_id, summary, resumed))
-                _show_progress(seed, targets, target_summaries, None)
+                monitor.finish(seed, target, summary, frame, resumed)
 
             overall = aggregate_overall(target_summaries)
             overall.update({"seed": int(seed), "kind": "individual_seed_overall"})
             atomic_write_json(run_root / "seed_{}".format(seed) / "overall.json", overall)
-            note(_blotter(seed, targets, {str(s["target_id"]): s for s in target_summaries}, None, overall))
+            monitor.seed_done(seed, overall)
             seed_results[int(seed)] = {"targets": target_summaries, "overall": overall}
 
-        run_bar.close()
+        monitor.close()
         ensemble_result: Optional[Dict[str, Any]] = None
         robustness: Optional[Dict[str, Any]] = None
         if len(config.seeds) >= 2:
@@ -435,6 +644,7 @@ class RollingRunner:
             ensemble_overall["seeds"] = list(config.seeds)
             atomic_write_json(run_root / "ensemble" / "metrics.json", ensemble_overall)
             ensemble_result = {"targets": ensemble_summaries, "overall": ensemble_overall}
+            monitor.ensemble_done(ensemble_summaries, ensemble_overall)
         return {
             "run_directory": str(run_root),
             "individual_seeds": seed_results,
@@ -472,17 +682,18 @@ class RollingRunner:
         atomic_write_json(run_root / "config.json", public_identity)
         seed_results: Dict[int, Dict[str, Any]] = {}
         prediction_by_seed: Dict[int, Dict[str, pd.DataFrame]] = {}
-        header("model", "LightGBM")
-        header("plan", "{} seed × {} targets".format(len(config.seeds), len(targets)))
-        run_bar = progress(
-            total=len(config.seeds) * len(targets), desc=config.experiment_name, unit="target"
+        monitor = _RunMonitor(
+            config,
+            targets,
+            run_root,
+            self.reference,
+            [("model", "LightGBM"), ("plan", "{} seed × {} targets".format(len(config.seeds), len(targets)))],
         )
         for seed in config.seeds:
             target_summaries = []
             prediction_by_seed[int(seed)] = {}
             for target in targets:
-                run_bar.set_postfix_str("seed {} · target {}".format(seed, target.target_id))
-                _show_progress(seed, targets, target_summaries, target.target_id)
+                monitor.start(seed, target)
                 target_root = run_root / "seed_{}".format(seed) / "target_{}".format(target.target_id)
                 preprocessing_path = target_root / "preprocessing.json"
                 model_path = target_root / "model.txt"
@@ -584,16 +795,14 @@ class RollingRunner:
                     atomic_write_json(metrics_path, summary)
                 prediction_by_seed[int(seed)][target.target_id] = frame
                 target_summaries.append(summary)
-                run_bar.update(1)
-                note(*_target_parts(seed, target.target_id, summary, resumed))
-                _show_progress(seed, targets, target_summaries, None)
+                monitor.finish(seed, target, summary, frame, resumed)
             overall = aggregate_overall(target_summaries)
             overall.update({"seed": int(seed), "kind": "individual_seed_overall"})
             atomic_write_json(run_root / "seed_{}".format(seed) / "overall.json", overall)
-            note(_blotter(seed, targets, {str(s["target_id"]): s for s in target_summaries}, None, overall))
+            monitor.seed_done(seed, overall)
             seed_results[int(seed)] = {"targets": target_summaries, "overall": overall}
 
-        run_bar.close()
+        monitor.close()
         robustness = None
         ensemble_result = None
         if len(config.seeds) >= 2:
@@ -632,6 +841,7 @@ class RollingRunner:
             )
             atomic_write_json(run_root / "ensemble" / "metrics.json", ensemble_overall)
             ensemble_result = {"targets": ensemble_summaries, "overall": ensemble_overall}
+            monitor.ensemble_done(ensemble_summaries, ensemble_overall)
         return {
             "run_directory": str(run_root),
             "individual_seeds": seed_results,

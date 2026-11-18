@@ -301,7 +301,40 @@ uv run --env-file .env scripts/run_rolling.py configs/us/stage1/master_d512_us_m
 
 R2 outputs are immutable: a script refuses to overwrite an existing location, so write each new data version to a new prefix (e.g. `us/v2`). The shipped US configs use the bucket `stock-transformer-data`; edit the `r2://` paths if your bucket has another name. The US profile currently covers Stage 1 (daily features). Remaining work (survivorship, delisting returns, US tuning, and the 390-bar intraday features) is planned in [docs/us_phase2_plan.md](docs/us_phase2_plan.md).
 
-Every long-running job (fetch, label and feature builds, rolling training) opens a full-screen terminal dashboard. It has a header with clock, elapsed time and ETA, nested progress bars, live training metrics with ▲▼ changes and sparklines, a timestamped event tape, a job board (fetch stages, or a target blotter with DONE/TRAIN/QUEUED and colour-coded test results), system load (CPU, RAM, GPU memory, disk), and a scrolling results ticker. When the job ends, a summary stays in the scrollback. Set `PROGRESS_DISABLE=1` for plain log lines, or `NO_COLOR=1` to drop colour. On MPS, the PyTorch warning `index_put_with_accumulate_mps does not have a deterministic implementation` is expected and harmless.
+Every long-running job (fetch, label and feature builds, rolling training) opens a full-screen terminal dashboard. It has:
+- a header with clock, elapsed time and ETA;
+- nested progress bars;
+- live training metrics with ▲▼ changes and sparklines;
+- a timestamped event tape;
+- a job board: fetch stages with data-quality counts, build quality, or a target blotter with DONE/TRAIN/QUEUED and colour-coded test results;
+- for multi-seed runs, a cross-seed table;
+- equity charts of cumulative daily rank IC and the long-short decile spread;
+- system load (CPU, RAM, GPU memory, disk);
+- a scrolling results ticker.
+
+Keys while it runs:
+- `s` stops a rolling run cleanly after the current target; continue later with `--resume`.
+- `↑`/`↓` scroll the tape and `G` returns to live.
+- `t` toggles between all events and the important ones.
+
+In a terminal narrower than 130 columns or shorter than 35 rows, the dashboard switches to a compact layout. When the job ends, a summary stays in the scrollback, and on macOS you get a notification. Rolling runs also write `dashboard.log` (the full event history) and `dashboard_status.json` into the run folder.
+
+To watch a run from another machine:
+
+```bash
+uv run --env-file .env scripts/watch.py r2://stock-transformer-data/us/v1/runs/<experiment>/dashboard_status.json
+```
+
+`run_rolling.py --compare <earlier run>` adds a Δ rank IC column against a reference run, such as a LightGBM baseline.
+
+Environment variables:
+- `PROGRESS_DISABLE=1` gives plain log lines.
+- `NO_COLOR=1` drops colour.
+- `DASHBOARD_ACCENT=green` changes the accent colour.
+- `DASHBOARD_NOTIFY=0` silences notifications.
+- `DASHBOARD_LOG` and `DASHBOARD_STATUS` set the log file and the status location for any job.
+
+On MPS, the PyTorch warning `index_put_with_accumulate_mps does not have a deterministic implementation` is expected and harmless.
 
 ### Custom Experiment Configuration
 

@@ -97,10 +97,24 @@ def _download(client: Any, bucket: str, key: str, cache_dir: Path, bar: Any) -> 
     return target
 
 
+class _NoBar(object):
+    def __enter__(self) -> "_NoBar":
+        return self
+
+    def __exit__(self, *_: Any) -> None:
+        pass
+
+    def update(self, n: float) -> None:
+        pass
+
+
 def materialize(
-    location: Any, base: Path, cache_dir: Path, client: Any = None
+    location: Any, base: Path, cache_dir: Path, client: Any = None, quiet: bool = False
 ) -> Path:
-    """Return a local path for ``location``, downloading R2 objects if needed."""
+    """Return a local path for ``location``, downloading R2 objects if needed.
+
+    ``quiet`` skips the progress bar (background polling such as the watcher).
+    """
     if not is_remote(location):
         path = Path(str(location))
         return path if path.is_absolute() else Path(base) / path
@@ -109,7 +123,7 @@ def materialize(
         client = r2_client_from_env()
     keys = _list_keys(client, bucket, key)
     if key in keys:
-        with _byte_bar("download", str(location), keys[key]) as bar:
+        with _NoBar() if quiet else _byte_bar("download", str(location), keys[key]) as bar:
             return _download(client, bucket, key, cache_dir, bar)
     children = sorted(
         item for item in keys
@@ -117,14 +131,14 @@ def materialize(
     )
     if not children:
         raise FileNotFoundError("R2 location is missing: {}".format(location))
-    with _byte_bar("download", str(location), sum(keys[c] for c in children)) as bar:
+    with _NoBar() if quiet else _byte_bar("download", str(location), sum(keys[c] for c in children)) as bar:
         for child in children:
             _download(client, bucket, child, cache_dir, bar)
     return Path(cache_dir, bucket, *key.split("/"))
 
 
 def publish(
-    local_path: Path, location: Any, client: Any = None, overwrite: bool = False
+    local_path: Path, location: Any, client: Any = None, overwrite: bool = False, quiet: bool = False
 ) -> None:
     """Upload a local file or directory to an R2 location; local is a no-op.
 
@@ -158,6 +172,6 @@ def publish(
     ):
         raise FileExistsError("R2 location already exists: {}".format(location))
     total = sum(path.stat().st_size for path, _ in uploads)
-    with _byte_bar("upload", str(location), total) as bar:
+    with _NoBar() if quiet else _byte_bar("upload", str(location), total) as bar:
         for path, object_key in uploads:
             client.upload_file(str(path), bucket, object_key, Callback=bar.update)
