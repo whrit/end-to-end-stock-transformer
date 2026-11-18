@@ -96,6 +96,8 @@ COMPACT_HEIGHT = 35
 STATUS_INTERVAL_SECONDS = 30.0
 NOTIFY_MIN_SECONDS = 60.0
 KEY_HINTS = "s stop after target · ↑↓ scroll · G live · t filter · Ctrl-C abort"
+# The watcher only views a job: Ctrl-C closes the view, and stopping is `remote.py stop JOB`.
+WATCH_HINTS = "↑↓ scroll · G live · t filter · Ctrl-C quit (the job keeps running)"
 STOPPED_EXIT_CODE = 3  # graceful stop: outputs saved, resumable with --resume
 _DEPTH_STYLES = ("bold cyan", "magenta", "blue", "bright_black")
 
@@ -716,9 +718,9 @@ def _system_table() -> Table:
     return table
 
 
-def _ticker_bar(items: Sequence[Text], width: int) -> Text:
+def _ticker_bar(items: Sequence[Text], width: int, hints: str = KEY_HINTS) -> Text:
     if not items:
-        return Text(" " + KEY_HINTS, style="dim")
+        return Text(" " + hints, style="dim")
     line = Text(" ")
     for item in items:
         line.append_text(item)
@@ -914,7 +916,7 @@ def snapshot_view(snapshot: Mapping[str, Any], width: int) -> Dict[str, Any]:
         ),
         "progress": Text.from_ansi(snapshot["progress_ansi"]),
         "progress_rows": int(snapshot["progress_rows"]),
-        "hints": "↑↓ scroll · G live · t filter · Ctrl-C quit",
+        "hints": WATCH_HINTS,
         "metrics": _metrics_table(snapshot.get("metrics", {})),
         "metrics_rows": sum(1 for entry in snapshot.get("metrics", {}).values() if entry["values"]),
         "tape": lambda lines: _tape_body(entries, lines, _tape_offset, _important_only),
@@ -923,7 +925,7 @@ def snapshot_view(snapshot: Mapping[str, Any], width: int) -> Dict[str, Any]:
         "equity": None if equity is None else _Chart([tuple(s) for s in equity["series"]], equity["marks"]),
         "equity_title": "" if equity is None else equity["title"],
         "system": Text.from_ansi(snapshot["system_ansi"]),
-        "ticker": _ticker_bar([Text.from_markup(item) for item in snapshot.get("ticker", [])], width),
+        "ticker": _ticker_bar([Text.from_markup(item) for item in snapshot.get("ticker", [])], width, WATCH_HINTS),
     }
 
 
