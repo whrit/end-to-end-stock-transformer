@@ -33,7 +33,7 @@ import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from rich.console import Console, Group
 from rich.prompt import Confirm, Prompt
@@ -365,6 +365,51 @@ VAST_API = "https://console.vast.ai/api/v0"
 DEFAULT_IMAGE = "pytorch/pytorch:2.4.0-cuda12.4-cudnn9-runtime"
 R2_VARIABLES = ("R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY")
 
+# Hard rental limits: prompts and flags may tighten them, never loosen them.
+MAX_PRICE_PER_HOUR = 0.50
+MIN_NETWORK_MBPS = 750.0  # both upload and download
+REGIONS = ("US", "CA", "MX")  # North America, by vast.ai country code
+# Compatibility with the locked CUDA torch: CUDA 13 builds need Turing (sm_75)
+# or newer GPUs and a host driver that supports the locked CUDA major version.
+MIN_COMPUTE_CAPABILITY = 750  # vast.ai encodes sm_75 as 750
+
+
+def _locked_cuda_major() -> float:
+    """CUDA major version of the torch runtime pinned in uv.lock (13.0 for 13.x)."""
+    lines = (ROOT / "uv.lock").read_text(encoding="utf-8").splitlines()
+    for index, line in enumerate(lines[:-1]):
+        if line.strip() == 'name = "nvidia-cuda-runtime"' and lines[index + 1].startswith("version"):
+            return float(lines[index + 1].split('"')[1].split(".")[0])
+    return 12.0
+
+
+MIN_HOST_CUDA = _locked_cuda_major()
+
+
+def _country(offer: Dict[str, Any]) -> str:
+    return str(offer.get("geolocation") or "").rsplit(",", 1)[-1].strip().upper()
+
+
+def _within_limits(offer: Dict[str, Any], max_price: float, min_network: float) -> bool:
+    return (
+        float(offer.get("dph_total") or 0.0) <= max_price
+        and float(offer.get("inet_up") or 0.0) >= min_network
+        and float(offer.get("inet_down") or 0.0) >= min_network
+        and _country(offer) in REGIONS
+        and float(offer.get("compute_cap") or 0) >= MIN_COMPUTE_CAPABILITY
+        and float(offer.get("cuda_max_good") or 0.0) >= MIN_HOST_CUDA
+    )
+
+
+def _checked_limits(max_price: Optional[float], min_network: Optional[float]) -> Tuple[float, float]:
+    price = MAX_PRICE_PER_HOUR if max_price is None else float(max_price)
+    network = MIN_NETWORK_MBPS if min_network is None else float(min_network)
+    if not 0 < price <= MAX_PRICE_PER_HOUR:
+        raise ValueError("max $/hour must be above 0 and at most {:.2f}".format(MAX_PRICE_PER_HOUR))
+    if network < MIN_NETWORK_MBPS:
+        raise ValueError("min network speed must be at least {:.0f} Mb/s".format(MIN_NETWORK_MBPS))
+    return price, network
+
 
 def _vast_key() -> str:
     key = os.environ.get("VAST_API_KEY", "").strip()
@@ -398,7 +443,9 @@ def _vast(method: str, path: str, body: Optional[Dict[str, Any]] = None) -> Dict
 
 
 def search_offers(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """On-demand offers matching ``filters``, sorted by price, value or speed."""
+    """On-demand North American offers within budget and network limits,
+    cheapest first (faster GPUs first among equal prices)."""
+    max_price, min_network = _checked_limits(filters["max_price"], filters["min_network"])
     query: Dict[str, Any] = {
         "rentable": {"eq": True},
         "rented": {"eq": False},
@@ -407,29 +454,26 @@ def search_offers(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
         "cpu_ram": {"gte": float(filters["ram"]) * 1024},
         "disk_space": {"gte": float(filters["disk"])},
         "reliability": {"gte": float(filters["reliability"])},
+        "dph_total": {"lte": max_price},
+        "inet_up": {"gte": min_network},
+        "inet_down": {"gte": min_network},
+        "geolocation": {"in": list(REGIONS)},
+        "compute_cap": {"gte": MIN_COMPUTE_CAPABILITY},
+        "cuda_max_good": {"gte": MIN_HOST_CUDA},
         "order": [["dph_total", "asc"]],
-        # The whole market is a few thousand offers (~3 s); fetch it all when
-        # filtering by name, or expensive GPUs fall outside the cheapest page.
-        "limit": 5000 if filters["gpu"] else 500,
+        "limit": 5000,  # a few hundred offers pass these limits; fetch them all
         "type": "on-demand",
     }
-    if filters["max_price"]:
-        query["dph_total"] = {"lte": float(filters["max_price"])}
     if filters["verified"]:
         query["verified"] = {"eq": True}
     offers = _vast("POST", "/bundles/", query).get("offers", [])
+    # Re-check client-side: never list an offer outside the hard limits.
+    offers = [offer for offer in offers if _within_limits(offer, max_price, min_network)]
     if filters["gpu"]:
-        # Client-side substring match: "4090", "a100", "H100 SXM", "rtx_3090" all work.
+        # Substring match: "4090", "3090", "a4000", "rtx_5080" all work.
         needle = str(filters["gpu"]).lower().replace("_", " ")
         offers = [offer for offer in offers if needle in str(offer.get("gpu_name", "")).lower()]
-
-    def value(offer: Dict[str, Any]) -> float:
-        return float(offer.get("dlperf") or 0.0) / max(float(offer.get("dph_total") or 0.0), 1e-9)
-
-    if filters["sort"] == "value":
-        offers.sort(key=value, reverse=True)
-    elif filters["sort"] == "speed":
-        offers.sort(key=lambda offer: float(offer.get("dlperf") or 0.0), reverse=True)
+    offers.sort(key=lambda offer: (float(offer.get("dph_total") or 0.0), -float(offer.get("dlperf") or 0.0)))
     return offers
 
 
@@ -438,7 +482,7 @@ def _offer_table(offers: List[Dict[str, Any]]) -> Table:
     for name, justify in (
         ("#", "right"), ("GPU", "left"), ("VRAM", "right"), ("RAM", "right"), ("disk", "right"),
         ("$/h", "right"), ("DLPerf", "right"), ("perf/$", "right"), ("reliab.", "right"),
-        ("net ↓", "right"), ("CUDA", "right"), ("location", "left"),
+        ("net ↑", "right"), ("net ↓", "right"), ("CUDA", "right"), ("location", "left"),
     ):
         table.add_column(name, justify=justify, no_wrap=True)
     for index, offer in enumerate(offers, start=1):
@@ -455,6 +499,7 @@ def _offer_table(offers: List[Dict[str, Any]]) -> Table:
             "{:.0f}".format(perf),
             Text("{:.0f}".format(perf / price if price else 0.0), style="cyan"),
             Text("{:.1%}".format(reliability), style="green" if reliability >= 0.99 else "yellow"),
+            "{:.0f} Mb/s".format(float(offer.get("inet_up") or 0)),
             "{:.0f} Mb/s".format(float(offer.get("inet_down") or 0)),
             str(offer.get("cuda_max_good", "?")),
             str(offer.get("geolocation") or "?"),
@@ -464,21 +509,42 @@ def _offer_table(offers: List[Dict[str, Any]]) -> Table:
 
 def _ask_filters(filters: Dict[str, Any]) -> Dict[str, Any]:
     def ask(label: str, key: str, cast: Any) -> None:
-        current = filters[key]
-        default = "any" if current in (None, "", 0) and key in ("gpu", "max_price") else str(current)
-        answer = Prompt.ask(label, default=default).strip()
-        filters[key] = None if answer.lower() in ("any", "") and key in ("gpu", "max_price") else cast(answer)
+        while True:
+            current = filters[key]
+            default = "any" if current in (None, "") and key == "gpu" else str(current)
+            answer = Prompt.ask(label, default=default).strip()
+            try:
+                value = None if key == "gpu" and answer.lower() in ("any", "") else cast(answer)
+                if key in ("max_price", "min_network"):
+                    _checked_limits(
+                        value if key == "max_price" else filters["max_price"],
+                        value if key == "min_network" else filters["min_network"],
+                    )
+            except ValueError as error:
+                console.print(Text(str(error), style="yellow"))
+                continue
+            filters[key] = value
+            return
 
     console.print(Text("Filters (Enter keeps the value in brackets)", style="bold dodger_blue1"))
-    ask("GPU name contains (e.g. 4090, A100, H100; 'any')", "gpu", str)
+    console.print(
+        Text(
+            "Always applied: ≤ ${:.2f}/h · ≥ {:.0f} Mb/s up and down · North America ({}) · "
+            "Turing+ GPU with CUDA ≥ {:.0f} driver (locked torch) · cheapest first".format(
+                MAX_PRICE_PER_HOUR, MIN_NETWORK_MBPS, ", ".join(REGIONS), MIN_HOST_CUDA
+            ),
+            style="dim",
+        )
+    )
+    ask("GPU name contains (e.g. 3090, 4090, A4000; 'any')", "gpu", str)
     ask("min GPUs", "gpus", int)
     ask("min VRAM per GPU, GB", "gpu_ram", float)
-    ask("max $/hour ('any')", "max_price", float)
+    ask("max $/hour (≤ {:.2f})".format(MAX_PRICE_PER_HOUR), "max_price", float)
+    ask("min network up/down, Mb/s (≥ {:.0f})".format(MIN_NETWORK_MBPS), "min_network", float)
     ask("min system RAM, GB", "ram", float)
     ask("min disk, GB", "disk", float)
     ask("min reliability (0-1)", "reliability", float)
     filters["verified"] = Confirm.ask("verified hosts only", default=bool(filters["verified"]))
-    filters["sort"] = Prompt.ask("sort by", choices=["price", "value", "speed"], default=filters["sort"])
     return filters
 
 
@@ -545,10 +611,15 @@ def cmd_rent(args: argparse.Namespace) -> int:
     missing = [name for name in R2_VARIABLES if not os.environ.get(name)]
     if missing:
         raise SystemExit("error: missing {} (run with --env-file .env)".format(", ".join(missing)))
+    try:
+        _checked_limits(args.max_price, args.min_network)
+    except ValueError as error:
+        raise SystemExit("error: {}".format(error))
     filters: Dict[str, Any] = {
-        "gpu": args.gpu, "gpus": args.gpus, "gpu_ram": args.min_vram, "max_price": args.max_price,
+        "gpu": args.gpu, "gpus": args.gpus, "gpu_ram": args.min_vram,
+        "max_price": args.max_price, "min_network": args.min_network,
         "ram": args.min_ram, "disk": args.disk, "reliability": args.min_reliability,
-        "verified": not args.unverified, "sort": args.sort,
+        "verified": not args.unverified,
     }
     interactive = sys.stdin.isatty() and not args.yes
     while True:
@@ -579,8 +650,12 @@ def cmd_rent(args: argparse.Namespace) -> int:
             continue
         offer = offers[int(choice) - 1]
         break
-    summary = "{}× {} · ${:.3f}/h · {:.0f} GB disk · {}".format(
+    max_price, min_network = _checked_limits(filters["max_price"], filters["min_network"])
+    if not _within_limits(offer, max_price, min_network):
+        raise SystemExit("error: offer {} is outside the rental limits; not renting".format(offer.get("id")))
+    summary = "{}× {} · ${:.3f}/h · {:.0f}/{:.0f} Mb/s up/down · {:.0f} GB disk · {}".format(
         offer.get("num_gpus", 1), offer.get("gpu_name"), float(offer.get("dph_total") or 0),
+        float(offer.get("inet_up") or 0), float(offer.get("inet_down") or 0),
         float(filters["disk"]), offer.get("geolocation") or "?",
     )
     console.print(Text("This rents a paid instance that runs until you destroy it: " + summary, style="bold yellow"))
@@ -620,16 +695,22 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("setup", help="upload the agent and print the instance start command").set_defaults(run=cmd_setup)
     rent = sub.add_parser("rent", help="pick and rent a vast.ai offer with the agent preinstalled")
-    rent.add_argument("--gpu", default=None, help="GPU name contains, e.g. 4090, A100, H100")
+    rent.add_argument("--gpu", default=None, help="GPU name contains, e.g. 3090, 4090, A4000")
     rent.add_argument("--gpus", type=int, default=1, help="minimum GPU count")
     rent.add_argument("--min-vram", type=float, default=16.0, help="minimum VRAM per GPU, GB")
-    rent.add_argument("--max-price", type=float, default=None, help="maximum $/hour")
+    rent.add_argument(
+        "--max-price", type=float, default=MAX_PRICE_PER_HOUR,
+        help="maximum $/hour (default and hard cap {:.2f})".format(MAX_PRICE_PER_HOUR),
+    )
+    rent.add_argument(
+        "--min-network", type=float, default=MIN_NETWORK_MBPS,
+        help="minimum upload and download Mb/s (default and floor {:.0f})".format(MIN_NETWORK_MBPS),
+    )
     rent.add_argument("--min-ram", type=float, default=32.0, help="minimum system RAM, GB")
     rent.add_argument("--disk", type=float, default=60.0, help="disk to allocate, GB (data + environment ≈ 15 GB)")
     rent.add_argument("--min-reliability", type=float, default=0.98)
     rent.add_argument("--unverified", action="store_true", help="include unverified hosts")
-    rent.add_argument("--sort", choices=["price", "value", "speed"], default="price", help="value = DLPerf per $")
-    rent.add_argument("--show", type=int, default=20, help="offers to list")
+    rent.add_argument("--show", type=int, default=20, help="offers to list (cheapest first)")
     rent.add_argument("--pick", type=int, default=None, help="offer number to rent without prompting")
     rent.add_argument("--yes", action="store_true", help="no prompts (needs --pick); still prints what it rents")
     rent.add_argument("--image", default=DEFAULT_IMAGE)

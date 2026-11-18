@@ -349,6 +349,14 @@ uv run --env-file .env scripts/remote.py rent        # 按条件筛选报价，�
 uv run --env-file .env scripts/remote.py instances   # 你的 vast.ai 实例及其 agent 是否在线
 ```
 
+选择器始终应用以下租用限制，只能收紧、不能放宽：
+- 每小时不超过 $0.50；
+- 上传和下载速度均不低于 750 Mb/s；
+- 仅限北美（美国、加拿大、墨西哥）；
+- GPU 与主机驱动必须能运行锁定的 CUDA 版 torch（Turing 及以上架构、CUDA 13+ 驱动；CUDA 最低版本从 `uv.lock` 读取）。
+
+报价始终按价格从低到高排列。这些限制是 `scripts/remote.py` 中 vast.ai 部分开头的常量。
+
 vast.ai 密钥读取自 `VAST_API_KEY` 或 `vastai` CLI 已保存的密钥。R2 密钥会作为环境变量传给实例；主机由第三方提供，建议使用仅限此 bucket 的 R2 token。若你在 vast.ai 网页上自行创建实例，先运行 `scripts/remote.py setup`，把打印出的环境变量和启动脚本填入模板。
 
 在本机上：

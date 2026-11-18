@@ -347,6 +347,14 @@ uv run --env-file .env scripts/remote.py rent        # filter offers, list them,
 uv run --env-file .env scripts/remote.py instances   # your vast.ai instances and whether their agent is online
 ```
 
+The picker always applies these rental limits; you can make them stricter but never looser:
+- at most $0.50/hour;
+- at least 750 Mb/s upload and download;
+- North America only (US, Canada, Mexico);
+- a GPU and host driver that can run the locked CUDA torch (Turing or newer, CUDA 13+ driver; the CUDA minimum is read from `uv.lock`).
+
+Offers are always listed cheapest first. The limits are constants at the top of the vast.ai section in `scripts/remote.py`.
+
 The vast.ai key comes from `VAST_API_KEY` or the `vastai` CLI's saved key. The R2 keys are passed to the instance as environment variables, and hosts are third parties, so a token limited to this bucket is best. If you create an instance yourself on the vast.ai website instead, run `scripts/remote.py setup` and paste the printed environment variables and start command into your template.
 
 From the laptop:
