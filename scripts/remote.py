@@ -345,7 +345,17 @@ def cmd_stop(args: argparse.Namespace) -> int:
 def cmd_pull(args: argparse.Namespace) -> int:
     store = _store(args)
     job = store.get_json("{}/job.json".format(args.job))
+    if job is None:  # an experiment name: its newest job
+        for job_id in [name for name in store.children() if not name.startswith("_")][::-1]:
+            candidate = store.get_json("{}/job.json".format(job_id)) or {}
+            if candidate.get("experiment") == args.job:
+                job = candidate
+                break
     location = job["run_location"] if job else args.job
+    if not storage.is_remote(location) and not Path(location).is_dir():
+        raise SystemExit(
+            "error: {} is not a job id, experiment name or run location (see remote.py list)".format(args.job)
+        )
     destination = Path(args.dest) / location.rstrip("/").rsplit("/", 1)[-1]
 
     def skip(relative: str) -> bool:
