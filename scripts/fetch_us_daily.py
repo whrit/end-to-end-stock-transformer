@@ -11,9 +11,11 @@ from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Sequence
 
 import pandas as pd
+from rich.table import Table
+from rich.text import Text
 
 from market_guided_stock_alpha.artifacts import atomic_write_json, sha256_path
-from market_guided_stock_alpha.progress import note
+from market_guided_stock_alpha.progress import board, note
 from market_guided_stock_alpha.storage import is_remote, publish, r2_client_from_env
 from market_guided_stock_alpha.us_data.alpaca import (
     NEW_YORK,
@@ -92,8 +94,27 @@ def _write_tables(
     atomic_write_json(directory / MANIFEST_NAME, manifest)
 
 
+STAGES = (
+    "list Alpaca assets",
+    "map tickers through OpenFIGI",
+    "fetch daily bars (adjusted, raw)",
+    "fetch trading calendar",
+    "build canonical tables",
+    "write tables",
+)
+
+
 def _stage(index: int, text: str) -> None:
-    note(("━━ {}/6 ".format(index), "bold magenta"), (text, "bold"))
+    table = Table.grid(padding=(0, 2))
+    for position, name in enumerate(STAGES, start=1):
+        if position < index:
+            table.add_row(Text("✓", style="bold green"), Text(name, style="green"))
+        elif position == index:
+            table.add_row(Text("▶", style="bold dodger_blue1"), Text(name, style="bold"))
+        else:
+            table.add_row(Text("·", style="dim"), Text(name, style="dim"))
+    board(table, "FETCH STAGES")
+    note(("━━ {}/{} ".format(index, len(STAGES)), "bold dodger_blue1"), (text, "bold"))
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:

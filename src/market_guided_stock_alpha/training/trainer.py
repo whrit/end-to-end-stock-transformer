@@ -11,7 +11,7 @@ from market_guided_stock_alpha.modeling.transport import (
     forward_date_batch,
     move_date_batch,
 )
-from market_guided_stock_alpha.progress import note, progress
+from market_guided_stock_alpha.progress import metric as show_metric, note, progress, reset_metrics
 from market_guided_stock_alpha.training.checkpoint import CheckpointManager
 from market_guided_stock_alpha.training.config import TrainingConfig, create_optimizer
 from market_guided_stock_alpha.training.losses import build_loss
@@ -140,6 +140,7 @@ class Trainer:
         best_epoch: Optional[int] = None
         without_improvement = 0
         stopped_early = False
+        reset_metrics()
         epochs = progress(
             range(1, self.config.epochs + 1), desc="epochs", unit="epoch", leave=False
         )
@@ -172,6 +173,9 @@ class Trainer:
                 valid="{:.4f}".format(metric),
                 best="{:.4f}@{}".format(best_metric, best_epoch),
             )
+            show_metric("train loss", train["train_loss"], higher_is_better=False)
+            show_metric("val loss", validation_loss, higher_is_better=False)
+            show_metric("val " + self.config.primary_metric, metric, higher_is_better=maximize)
             note(
                 ("    epoch {:>3}/{:<3}".format(epoch, self.config.epochs), "bold"),
                 ("  train_loss ", "dim"),

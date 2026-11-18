@@ -8,7 +8,7 @@ import numpy as np
 
 from market_guided_stock_alpha.dataset.dataset import SequenceSample
 from market_guided_stock_alpha.dataset.layout import FeatureLayout
-from market_guided_stock_alpha.progress import progress
+from market_guided_stock_alpha.progress import metric as show_metric, progress, reset_metrics
 from market_guided_stock_alpha.training.config import LightGBMTrainingConfig
 from market_guided_stock_alpha.training.metrics import daily_rank_ic
 
@@ -182,6 +182,7 @@ class LightGBMRegressor:
 
         selection: Dict[str, Any] = {"history": []}
         rounds = progress(total=config.num_boost_round, desc="boosting", unit="round", leave=False)
+        reset_metrics()
 
         def selection_callback(environment: Any) -> None:
             current = {}
@@ -206,6 +207,9 @@ class LightGBMRegressor:
                 selection["best_metrics"] = dict(current)
                 selection["best_score_list"] = list(environment.evaluation_result_list)
             rounds.update(1)
+            show_metric("val rank IC", current["mean_rankic"])
+            show_metric("val IC", current["mean_ic"])
+            show_metric("val zscore MSE", current["daily_zscore_mse"], higher_is_better=False)
             rounds.set_postfix(
                 rank_ic="{:.4f}".format(current["mean_rankic"]),
                 best="{:.4f}@{}".format(

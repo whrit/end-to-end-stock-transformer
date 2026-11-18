@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple
 
 import pandas as pd
 import torch
+from rich import box
 from rich.table import Table
 from rich.text import Text
 
@@ -29,7 +30,7 @@ from market_guided_stock_alpha.rolling.artifacts import (
     read_prediction_artifact,
     write_prediction_artifact,
 )
-from market_guided_stock_alpha.progress import note, progress
+from market_guided_stock_alpha.progress import board, header, note, progress, ticker
 from market_guided_stock_alpha.rolling.prediction import (
     predict_lightgbm_model,
     predict_neural_model,
@@ -39,6 +40,7 @@ from market_guided_stock_alpha.rolling.schedule import (
     initialize_target_model,
 )
 from market_guided_stock_alpha.rolling.targets import RollingTarget
+from market_guided_stock_alpha.training.seed import resolve_device
 from market_guided_stock_alpha.training.checkpoint import (
     CheckpointContract,
     CheckpointManager,
@@ -95,22 +97,26 @@ class RollingRunConfig:
 
 
 def _metric(value: Any) -> Tuple[str, str]:
-    """Formatted metric with a sign colour."""
+    """Formatted metric with a direction arrow and sign colour."""
     if value is None:
         return "n/a", "dim"
     value = float(value)
-    return "{:+.4f}".format(value), "green" if value > 0 else "red" if value < 0 else "white"
+    if value > 0:
+        return "▲{:+.4f}".format(value), "green"
+    if value < 0:
+        return "▼{:+.4f}".format(value), "red"
+    return "■{:+.4f}".format(value), "white"
 
 
 def _selection(summary: Mapping[str, Any]) -> str:
     training = summary.get("training") or {}
     if training.get("best_epoch") is not None:
-        return "epoch {} · {:.4f}".format(
+        return "ep {} · {:.4f}".format(
             training["best_epoch"], float(training.get("best_validation_metric", float("nan")))
         )
     if training.get("best_iteration") is not None:
         rank_ic = (training.get("best_validation_metrics") or {}).get("mean_rankic")
-        return "round {} · {:.4f}".format(
+        return "rd {} · {:.4f}".format(
             training["best_iteration"], float("nan") if rank_ic is None else float(rank_ic)
         )
     return "n/a"
@@ -136,33 +142,71 @@ def _target_parts(
     )
 
 
-def _seed_table(seed: int, summaries: Sequence[Mapping[str, Any]], overall: Mapping[str, Any]) -> Table:
+def _blotter(
+    seed: int,
+    targets: Sequence[RollingTarget],
+    done: Mapping[str, Mapping[str, Any]],
+    current: Optional[str],
+    overall: Optional[Mapping[str, Any]] = None,
+) -> Table:
+    """Target blotter: status and test metrics for every target of one seed."""
     table = Table(
-        title="seed {} · test results".format(seed),
-        title_style="bold magenta",
-        header_style="bold cyan",
-        border_style="bright_black",
+        title=None if overall is None else "seed {} · targets".format(seed),
+        title_style="bold dodger_blue1",
+        header_style="bold dodger_blue1",
+        border_style="grey37",
+        box=box.SIMPLE_HEAD,
     )
     for name, justify in (
         ("target", "left"),
+        ("status", "left"),
         ("best (valid)", "left"),
         ("rank IC", "right"),
         ("IC", "right"),
         ("top5", "right"),
         ("top10", "right"),
     ):
-        table.add_column(name, justify=justify)
+        table.add_column(name, justify=justify, no_wrap=True)
 
     def cells(row: Mapping[str, Any]) -> Sequence[Text]:
         return [Text(*_metric(row.get(name))) for name in ("rank_ic", "ic", "top5", "top10")]
 
-    for summary in summaries:
-        table.add_row(str(summary.get("target_id")), _selection(summary), *cells(summary))
-    table.add_section()
-    table.add_row(
-        Text("overall ({})".format(overall.get("target_count")), style="bold"), "", *cells(overall)
-    )
+    for target in targets:
+        summary = done.get(target.target_id)
+        if summary is not None:
+            table.add_row(
+                target.target_id, Text("DONE", style="green"), _selection(summary), *cells(summary)
+            )
+        elif target.target_id == current:
+            table.add_row(target.target_id, Text("TRAIN", style="bold yellow"), "", *[Text("···", style="dim")] * 4)
+        else:
+            table.add_row(Text(target.target_id, style="dim"), Text("QUEUED", style="dim"))
+    if overall is not None:
+        table.add_section()
+        table.add_row(
+            Text("OVERALL", style="bold"), Text("{} targets".format(overall.get("target_count")), style="dim"), "", *cells(overall)
+        )
     return table
+
+
+def _show_progress(
+    seed: int,
+    targets: Sequence[RollingTarget],
+    summaries: Sequence[Mapping[str, Any]],
+    current: Optional[str],
+) -> None:
+    done = {str(summary["target_id"]): summary for summary in summaries}
+    board(_blotter(seed, targets, done, current), "TARGETS · seed {}".format(seed))
+    if summaries:
+        last = summaries[-1]
+        ticker(
+            "{}/{}".format(seed, last["target_id"]),
+            ("s{} {} ".format(seed, last["target_id"]), "bold"),
+            ("rIC ", "dim"),
+            _metric(last.get("rank_ic")),
+            ("  top10 ", "dim"),
+            _metric(last.get("top10")),
+        )
 
 
 def _build_dataset(
@@ -221,6 +265,8 @@ class RollingRunner:
 
         seed_results: Dict[int, Dict[str, Any]] = {}
         prediction_by_seed: Dict[int, Dict[str, pd.DataFrame]] = {}
+        header("device", resolve_device(self.device))
+        header("plan", "{} seed × {} targets".format(len(config.seeds), len(targets)))
         run_bar = progress(
             total=len(config.seeds) * len(targets), desc=config.experiment_name, unit="target"
         )
@@ -230,6 +276,7 @@ class RollingRunner:
             prediction_by_seed[int(seed)] = {}
             for target in targets:
                 run_bar.set_postfix_str("seed {} · target {}".format(seed, target.target_id))
+                _show_progress(seed, targets, target_summaries, target.target_id)
                 target_root = run_root / "seed_{}".format(seed) / "target_{}".format(target.target_id)
                 checkpoint_root = target_root / "checkpoints"
                 preprocessing_path = target_root / "preprocessing.json"
@@ -345,11 +392,12 @@ class RollingRunner:
                 target_summaries.append(summary)
                 run_bar.update(1)
                 note(*_target_parts(seed, target.target_id, summary, resumed))
+                _show_progress(seed, targets, target_summaries, None)
 
             overall = aggregate_overall(target_summaries)
             overall.update({"seed": int(seed), "kind": "individual_seed_overall"})
             atomic_write_json(run_root / "seed_{}".format(seed) / "overall.json", overall)
-            note(_seed_table(seed, target_summaries, overall))
+            note(_blotter(seed, targets, {str(s["target_id"]): s for s in target_summaries}, None, overall))
             seed_results[int(seed)] = {"targets": target_summaries, "overall": overall}
 
         run_bar.close()
@@ -424,6 +472,8 @@ class RollingRunner:
         atomic_write_json(run_root / "config.json", public_identity)
         seed_results: Dict[int, Dict[str, Any]] = {}
         prediction_by_seed: Dict[int, Dict[str, pd.DataFrame]] = {}
+        header("model", "LightGBM")
+        header("plan", "{} seed × {} targets".format(len(config.seeds), len(targets)))
         run_bar = progress(
             total=len(config.seeds) * len(targets), desc=config.experiment_name, unit="target"
         )
@@ -432,6 +482,7 @@ class RollingRunner:
             prediction_by_seed[int(seed)] = {}
             for target in targets:
                 run_bar.set_postfix_str("seed {} · target {}".format(seed, target.target_id))
+                _show_progress(seed, targets, target_summaries, target.target_id)
                 target_root = run_root / "seed_{}".format(seed) / "target_{}".format(target.target_id)
                 preprocessing_path = target_root / "preprocessing.json"
                 model_path = target_root / "model.txt"
@@ -535,10 +586,11 @@ class RollingRunner:
                 target_summaries.append(summary)
                 run_bar.update(1)
                 note(*_target_parts(seed, target.target_id, summary, resumed))
+                _show_progress(seed, targets, target_summaries, None)
             overall = aggregate_overall(target_summaries)
             overall.update({"seed": int(seed), "kind": "individual_seed_overall"})
             atomic_write_json(run_root / "seed_{}".format(seed) / "overall.json", overall)
-            note(_seed_table(seed, target_summaries, overall))
+            note(_blotter(seed, targets, {str(s["target_id"]): s for s in target_summaries}, None, overall))
             seed_results[int(seed)] = {"targets": target_summaries, "overall": overall}
 
         run_bar.close()
