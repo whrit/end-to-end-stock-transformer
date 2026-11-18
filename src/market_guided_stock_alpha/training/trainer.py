@@ -10,6 +10,7 @@ from market_guided_stock_alpha.modeling.transport import (
     forward_date_batch,
     move_date_batch,
 )
+from market_guided_stock_alpha.progress import progress
 from market_guided_stock_alpha.training.checkpoint import CheckpointManager
 from market_guided_stock_alpha.training.config import TrainingConfig, create_optimizer
 from market_guided_stock_alpha.training.losses import build_loss
@@ -64,7 +65,9 @@ class Trainer:
             loader.set_epoch(epoch)
         self.model.train()
         rows: List[Dict[str, Any]] = []
-        for cpu_batch in loader:
+        for cpu_batch in progress(
+            loader, desc="epoch {} train".format(epoch), unit="date", leave=False
+        ):
             batch = move_date_batch(cpu_batch, self.device)
             self.optimizer.zero_grad(set_to_none=True)
             predictions = forward_date_batch(self.model, batch)
@@ -101,7 +104,7 @@ class Trainer:
         rows: List[Dict[str, Any]] = []
         predictions_by_date: List[Dict[str, Any]] = []
         with torch.no_grad():
-            for cpu_batch in loader:
+            for cpu_batch in progress(loader, desc="validate", unit="date", leave=False):
                 batch = move_date_batch(cpu_batch, self.device)
                 predictions = forward_date_batch(self.model, batch)
                 result = self._loss(predictions, batch)
@@ -136,7 +139,10 @@ class Trainer:
         best_epoch: Optional[int] = None
         without_improvement = 0
         stopped_early = False
-        for epoch in range(1, self.config.epochs + 1):
+        epochs = progress(
+            range(1, self.config.epochs + 1), desc="epochs", unit="epoch", leave=False
+        )
+        for epoch in epochs:
             train = self.train_epoch(train_loader, epoch)
             validation = self.validate(valid_loader)
             validation_loss = float(validation["validation_loss"])
@@ -152,6 +158,11 @@ class Trainer:
                 }
             )
             history.append(row)
+            epochs.set_postfix(
+                train_loss="{:.4f}".format(train["train_loss"]),
+                valid="{:.4f}".format(metric),
+                refresh=False,
+            )
             improved = metric > best_metric if maximize else metric < best_metric
             if improved:
                 best_metric = metric
@@ -178,6 +189,7 @@ class Trainer:
             ):
                 stopped_early = True
                 break
+        epochs.close()
         return {
             "history": history,
             "best_epoch": best_epoch,

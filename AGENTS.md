@@ -128,6 +128,13 @@ There is no linter or formatter configured. Match the surrounding style.
   - Never `np.asarray(..., float64)` or `np.concatenate` a full `[D,S,F]` / `[N,F]` matrix.
   - China output must stay byte-identical (Alpha158 `dtype` default `float64`; `--dtype float32 --membership` is for US).
 - **Security codes** (`data/contracts.py` `normalize_security_code`): China `NNNNNN.SH|SZ|BJ`, US stocks = share-class FIGI `BBG[0-9A-Z]{9}`, US ETFs `TICKER.US`. Artifact `security_ids.npy` dtype is sized to the longest code (China stays `U9`).
+- **Progress output.** Long loops use `market_guided_stock_alpha.progress`:
+  - Wrap loops with `progress(iterable_or_total=..., desc=..., unit=...)`, a tqdm wrapper.
+  - Use `note(...)` for stage messages from loops that can't be wrapped.
+  - Inner bars use `leave=False`. Count real work units (target, date, stock, symbol, bytes), not batches.
+  - Both write to stderr only, because stdout carries the scripts' JSON manifests. Bars auto-disable off-TTY, so tests and pipes stay quiet.
+  - Never let a bar change outputs or metrics.
+  - Wired in: rolling runner (seed × target), trainer (epochs with loss/metric postfix, train/validate dates), prediction, fit statistics, Alpha158 build (per stock; parallel futures advance it), intraday builders, R2 transfers (bytes), Alpaca/OpenFIGI fetch, and `fetch_us_daily.py` stages.
 
 ## Important Files
 
@@ -151,7 +158,8 @@ There is no linter or formatter configured. Match the surrounding style.
 ## Runtime/Tooling Preferences
 
 - **uv** with `uv.lock`, and **Python 3.14** (`.python-version`, `requires-python = ">=3.14"`). Use `uv add` / `uv sync` rather than pip.
-- Core deps: `numpy`, `pandas`, `torch`. Optional extras: `lightgbm` (LightGBM baseline), `parquet` (pyarrow, for `.parquet` inputs), `us` (alpaca-py, boto3, pyarrow). Dev group: `pytest`.
+- Core deps: `numpy`, `pandas`, `torch`, `tqdm` (progress bars; `TQDM_DISABLE=1` hides them, `TQDM_MININTERVAL=5` slows refresh). Optional extras: `lightgbm` (LightGBM baseline), `parquet` (pyarrow, for `.parquet` inputs), `us` (alpaca-py, boto3, pyarrow). Dev group: `pytest`.
+- On MPS, the PyTorch warning `index_put_with_accumulate_mps does not have a deterministic implementation` is expected: one backward op has no deterministic MPS kernel, so same-seed reruns can differ in the last decimals. Use `--device cpu` for bit-exact reruns.
 - Pickle inputs and outputs are pandas pickles. Load only trusted files.
 - Never commit `data/`, `runs/`, `outputs/`, `*.pt`/`*.ckpt`, or `/backtesting/`.
 - US credentials come only from env: `APCA_API_KEY_ID`, `APCA_API_SECRET_KEY` (+ `APCA_PAPER=false` for live-account keys; default paper), `OPENFIGI_API_KEY`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`. Never write them to files, manifests, or logs. US deps: `uv sync --extra us` (alpaca-py, boto3, pyarrow).

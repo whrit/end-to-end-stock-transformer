@@ -8,7 +8,9 @@ path semantics and never import boto3.
 import os
 import re
 from pathlib import Path
-from typing import Any, List, Tuple
+from typing import Any, Dict, Tuple
+
+from market_guided_stock_alpha.progress import progress
 
 
 R2_SCHEME = "r2://"
@@ -68,22 +70,34 @@ def r2_client_from_env() -> Any:
     )
 
 
-def _list_keys(client: Any, bucket: str, prefix: str) -> List[str]:
-    keys = []
+def _list_keys(client: Any, bucket: str, prefix: str) -> Dict[str, int]:
+    """Map every object key under ``prefix`` to its size in bytes."""
+    keys: Dict[str, int] = {}
     request = {"Bucket": bucket, "Prefix": prefix}
     while True:
         response = client.list_objects_v2(**request)
-        keys.extend(item["Key"] for item in response.get("Contents", ()))
+        for item in response.get("Contents", ()):
+            keys[item["Key"]] = int(item.get("Size", 0))
         if not response.get("IsTruncated"):
             return keys
         request["ContinuationToken"] = response["NextContinuationToken"]
 
 
-def _download(client: Any, bucket: str, key: str, cache_dir: Path) -> Path:
+def _byte_bar(action: str, uri: str, total: int) -> Any:
+    return progress(
+        total=total,
+        desc="{} {}".format(action, uri.rstrip("/").rsplit("/", 1)[-1]),
+        unit="B",
+        unit_scale=True,
+        unit_divisor=1024,
+    )
+
+
+def _download(client: Any, bucket: str, key: str, cache_dir: Path, bar: Any) -> Path:
     uri = "{}{}/{}".format(R2_SCHEME, bucket, key)
     target = Path(cache_dir, bucket, *_validate_key(key, uri).split("/"))
     target.parent.mkdir(parents=True, exist_ok=True)
-    client.download_file(bucket, key, str(target))
+    client.download_file(bucket, key, str(target), Callback=bar.update)
     return target
 
 
@@ -99,15 +113,17 @@ def materialize(
         client = r2_client_from_env()
     keys = _list_keys(client, bucket, key)
     if key in keys:
-        return _download(client, bucket, key, cache_dir)
+        with _byte_bar("download", str(location), keys[key]) as bar:
+            return _download(client, bucket, key, cache_dir, bar)
     children = sorted(
         item for item in keys
         if item.startswith(key + "/") and not item.endswith("/")
     )
     if not children:
         raise FileNotFoundError("R2 location is missing: {}".format(location))
-    for child in children:
-        _download(client, bucket, child, cache_dir)
+    with _byte_bar("download", str(location), sum(keys[c] for c in children)) as bar:
+        for child in children:
+            _download(client, bucket, child, cache_dir, bar)
     return Path(cache_dir, bucket, *key.split("/"))
 
 
@@ -145,5 +161,7 @@ def publish(
         for item in _list_keys(client, bucket, key)
     ):
         raise FileExistsError("R2 location already exists: {}".format(location))
-    for path, object_key in uploads:
-        client.upload_file(str(path), bucket, object_key)
+    total = sum(path.stat().st_size for path, _ in uploads)
+    with _byte_bar("upload", str(location), total) as bar:
+        for path, object_key in uploads:
+            client.upload_file(str(path), bucket, object_key, Callback=bar.update)

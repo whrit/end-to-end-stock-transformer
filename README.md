@@ -301,6 +301,8 @@ uv run --env-file .env scripts/run_rolling.py configs/us/stage1/master_d512_us_m
 
 R2 outputs are immutable: a script refuses to overwrite an existing location, so write each new data version to a new prefix (e.g. `us/v2`). The shipped US configs use the bucket `stock-transformer-data`; edit the `r2://` paths if your bucket has another name. The US profile currently covers Stage 1 (daily features). Remaining work (survivorship, delisting returns, US tuning, and the 390-bar intraday features) is planned in [docs/us_phase2_plan.md](docs/us_phase2_plan.md).
 
+Long-running steps show tqdm progress bars on stderr, with done/total, rate, elapsed time, and ETA. Rolling runs show seed × target, then epochs with train loss and validation metric, then dates. Builds show stocks or dates, R2 transfers show bytes, and the fetch shows symbols. Set `TQDM_DISABLE=1` to hide them, or `TQDM_MININTERVAL=5` to refresh less often. On MPS, the PyTorch warning `index_put_with_accumulate_mps does not have a deterministic implementation` is expected and harmless.
+
 ### Custom Experiment Configuration
 
 To run a custom experiment, copy the closest JSON config under `configs/`, update `experiment_name` and the data paths, and then modify the project-specific settings as needed.

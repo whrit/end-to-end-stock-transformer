@@ -16,6 +16,7 @@ from market_guided_stock_alpha.dataset.layout import (
     feature_names,
 )
 from market_guided_stock_alpha.derived.artifact import FeatureArtifact
+from market_guided_stock_alpha.progress import progress
 
 
 @dataclass(frozen=True)
@@ -182,7 +183,13 @@ def _cross_section_fit_values(
     lookup = ArtifactLookup(artifact)
     parts = []
     selected = membership.loc[membership["trade_date"].isin(fit_dates)]
-    for day, group in selected.groupby("trade_date", sort=True):
+    for day, group in progress(
+        selected.groupby("trade_date", sort=True),
+        total=int(selected["trade_date"].nunique()),
+        desc="fit stats {}".format(artifact.family),
+        unit="date",
+        leave=False,
+    ):
         values, observed = lookup.cross_section_window(
             [day], tuple(group["sec_code"]), allow_missing=allow_missing
         )

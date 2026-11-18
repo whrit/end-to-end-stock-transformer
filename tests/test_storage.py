@@ -48,7 +48,11 @@ class FakeS3Client(object):
         )
         start = int(ContinuationToken or 0)
         page = keys[start:start + self.page_size]
-        response = {"Contents": [{"Key": key} for key in page]}
+        response = {
+            "Contents": [
+                {"Key": key, "Size": len(self.objects[(Bucket, key)])} for key in page
+            ]
+        }
         if start + self.page_size < len(keys):
             response["IsTruncated"] = True
             response["NextContinuationToken"] = str(start + self.page_size)
@@ -56,11 +60,17 @@ class FakeS3Client(object):
             response["IsTruncated"] = False
         return response
 
-    def download_file(self, Bucket, Key, Filename):
-        Path(Filename).write_bytes(self.objects[(Bucket, Key)])
+    def download_file(self, Bucket, Key, Filename, Callback=None):
+        data = self.objects[(Bucket, Key)]
+        Path(Filename).write_bytes(data)
+        if Callback is not None:
+            Callback(len(data))
 
-    def upload_file(self, Filename, Bucket, Key):
-        self.objects[(Bucket, Key)] = Path(Filename).read_bytes()
+    def upload_file(self, Filename, Bucket, Key, Callback=None):
+        data = Path(Filename).read_bytes()
+        self.objects[(Bucket, Key)] = data
+        if Callback is not None:
+            Callback(len(data))
 
 
 def daily_stock(periods=65):

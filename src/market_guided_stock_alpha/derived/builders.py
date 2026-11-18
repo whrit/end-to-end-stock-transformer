@@ -19,6 +19,7 @@ from market_guided_stock_alpha.data.contracts import (
 )
 from market_guided_stock_alpha.data.minute_session import normalize_minute_session
 from market_guided_stock_alpha.derived.artifact import write_feature_artifact
+from market_guided_stock_alpha.progress import progress
 from market_guided_stock_alpha.derived.specs import (
     alpha158_spec,
     intraday_market_spec,
@@ -160,41 +161,48 @@ def build_alpha158_artifact(
         values_path = str(scratch / "values.npy")
         date_values = dates.to_numpy()
         batches = (
-            source.iloc[
-                np.sort(
-                    np.concatenate(
-                        [rows_by_code[code] for code in codes[start : start + batch_securities]]
+            (
+                len(codes[start : start + batch_securities]),
+                source.iloc[
+                    np.sort(
+                        np.concatenate(
+                            [rows_by_code[code] for code in codes[start : start + batch_securities]]
+                        )
                     )
-                )
-            ]
+                ],
+            )
             for start in range(0, len(codes), batch_securities)
         )
+        bar = progress(total=len(codes), desc="alpha158", unit="stock")
         if workers == 1:
-            for batch in batches:
+            for count, batch in batches:
                 _write_alpha158_batch(values_path, batch, date_values, codes)
+                bar.update(count)
         else:
             # Bound queued batches so the parent never holds a second full
             # copy of the input as pending task arguments.
             with ProcessPoolExecutor(
                 max_workers=workers, initializer=_lower_worker_priority
             ) as pool:
-                in_flight = set()
+                in_flight: Dict[Any, int] = {}
                 try:
-                    for batch in batches:
+                    for count, batch in batches:
                         if len(in_flight) >= 2 * workers:
-                            done, in_flight = wait(in_flight, return_when=FIRST_COMPLETED)
+                            done, _ = wait(in_flight, return_when=FIRST_COMPLETED)
                             for future in done:
                                 future.result()
-                        in_flight.add(
-                            pool.submit(
-                                _write_alpha158_batch, values_path, batch, date_values, codes
-                            )
+                                bar.update(in_flight.pop(future))
+                        future = pool.submit(
+                            _write_alpha158_batch, values_path, batch, date_values, codes
                         )
-                    for future in in_flight:
+                        in_flight[future] = count
+                    for future in list(in_flight):
                         future.result()
+                        bar.update(in_flight.pop(future))
                 except BaseException:
                     pool.shutdown(wait=True, cancel_futures=True)
                     raise
+        bar.close()
         extra = dict(provenance or {})
         if storage:
             extra["alpha158_storage"] = storage
@@ -352,7 +360,7 @@ def build_intraday_price_volume_artifact(
     values = np.full((len(dates), len(codes), 248), np.nan, dtype="float32")
     observed = np.zeros((len(dates), len(codes)), dtype="bool")
     coverage = np.zeros((len(dates), len(codes)), dtype="float32")
-    for position, day in enumerate(dates):
+    for position, day in enumerate(progress(dates, desc="intraday features", unit="date")):
         frame = source.loc[
             pd.DatetimeIndex(source["timestamp"]).normalize() == day
         ]
@@ -398,7 +406,7 @@ def build_intraday_market_artifact(
     values = np.full((len(dates), 192), np.nan, dtype="float64")
     observed = np.zeros(len(dates), dtype="bool")
     total_ohlc_repair_count = 0
-    for position, day in enumerate(dates):
+    for position, day in enumerate(progress(dates, desc="intraday market", unit="date")):
         frame = source.loc[
             pd.DatetimeIndex(source["timestamp"]).normalize() == day
         ]

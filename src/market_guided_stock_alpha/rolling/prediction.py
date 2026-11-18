@@ -11,6 +11,7 @@ from market_guided_stock_alpha.modeling.transport import (
     forward_date_batch,
     move_date_batch,
 )
+from market_guided_stock_alpha.progress import progress
 from market_guided_stock_alpha.training.seed import resolve_device
 
 
@@ -25,7 +26,7 @@ def predict_neural_model(
     model.eval()
     rows: List[pd.DataFrame] = []
     with torch.no_grad():
-        for cpu_batch in loader:
+        for cpu_batch in progress(loader, desc="predict", unit="date", leave=False):
             batch = move_date_batch(cpu_batch, target_device)
             prediction = forward_date_batch(model, batch).detach().cpu().numpy()
             rows.append(
@@ -51,7 +52,7 @@ def predict_neural_model(
 def predict_lightgbm_model(model: Any, dataset: Any, target_id: str) -> pd.DataFrame:
     """Predict from the formal eight-day day-then-feature flattened view."""
     rows = []
-    for position in range(len(dataset)):
+    for position in progress(range(len(dataset)), desc="predict", unit="date", leave=False):
         sample = dataset[position]
         prediction = np.asarray(
             model.predict(flatten_sequence_sample(sample)), dtype="float64"

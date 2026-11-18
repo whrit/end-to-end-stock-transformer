@@ -27,6 +27,7 @@ from market_guided_stock_alpha.rolling.artifacts import (
     read_prediction_artifact,
     write_prediction_artifact,
 )
+from market_guided_stock_alpha.progress import progress
 from market_guided_stock_alpha.rolling.prediction import (
     predict_lightgbm_model,
     predict_neural_model,
@@ -147,11 +148,15 @@ class RollingRunner:
 
         seed_results: Dict[int, Dict[str, Any]] = {}
         prediction_by_seed: Dict[int, Dict[str, pd.DataFrame]] = {}
+        run_bar = progress(
+            total=len(config.seeds) * len(targets), desc=config.experiment_name, unit="target"
+        )
         for seed in config.seeds:
             previous_best: Optional[Path] = None
             target_summaries = []
             prediction_by_seed[int(seed)] = {}
             for target in targets:
+                run_bar.set_postfix_str("seed {} · target {}".format(seed, target.target_id))
                 target_root = run_root / "seed_{}".format(seed) / "target_{}".format(target.target_id)
                 checkpoint_root = target_root / "checkpoints"
                 preprocessing_path = target_root / "preprocessing.json"
@@ -265,12 +270,14 @@ class RollingRunner:
                 previous_best = best_path
                 prediction_by_seed[int(seed)][target.target_id] = frame
                 target_summaries.append(summary)
+                run_bar.update(1)
 
             overall = aggregate_overall(target_summaries)
             overall.update({"seed": int(seed), "kind": "individual_seed_overall"})
             atomic_write_json(run_root / "seed_{}".format(seed) / "overall.json", overall)
             seed_results[int(seed)] = {"targets": target_summaries, "overall": overall}
 
+        run_bar.close()
         ensemble_result: Optional[Dict[str, Any]] = None
         robustness: Optional[Dict[str, Any]] = None
         if len(config.seeds) >= 2:
@@ -342,10 +349,14 @@ class RollingRunner:
         atomic_write_json(run_root / "config.json", public_identity)
         seed_results: Dict[int, Dict[str, Any]] = {}
         prediction_by_seed: Dict[int, Dict[str, pd.DataFrame]] = {}
+        run_bar = progress(
+            total=len(config.seeds) * len(targets), desc=config.experiment_name, unit="target"
+        )
         for seed in config.seeds:
             target_summaries = []
             prediction_by_seed[int(seed)] = {}
             for target in targets:
+                run_bar.set_postfix_str("seed {} · target {}".format(seed, target.target_id))
                 target_root = run_root / "seed_{}".format(seed) / "target_{}".format(target.target_id)
                 preprocessing_path = target_root / "preprocessing.json"
                 model_path = target_root / "model.txt"
@@ -447,11 +458,13 @@ class RollingRunner:
                     atomic_write_json(metrics_path, summary)
                 prediction_by_seed[int(seed)][target.target_id] = frame
                 target_summaries.append(summary)
+                run_bar.update(1)
             overall = aggregate_overall(target_summaries)
             overall.update({"seed": int(seed), "kind": "individual_seed_overall"})
             atomic_write_json(run_root / "seed_{}".format(seed) / "overall.json", overall)
             seed_results[int(seed)] = {"targets": target_summaries, "overall": overall}
 
+        run_bar.close()
         robustness = None
         ensemble_result = None
         if len(config.seeds) >= 2:

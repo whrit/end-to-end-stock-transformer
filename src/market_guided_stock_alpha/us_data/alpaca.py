@@ -8,6 +8,7 @@ from typing import Any, List, Optional, Sequence
 import pandas as pd
 
 from market_guided_stock_alpha.data.contracts import DataQualityError
+from market_guided_stock_alpha.progress import progress
 
 
 NEW_YORK = "America/New_York"
@@ -138,6 +139,9 @@ def fetch_daily_bars(
     )
     unique = sorted(set(str(symbol).upper() for symbol in symbols))
     pieces = []
+    bar = progress(
+        total=len(unique), desc="Alpaca daily bars ({})".format(adjustment), unit="symbol"
+    )
     for offset in range(0, len(unique), chunk_size):
         result = data_client.get_stock_bars(
             StockBarsRequest(
@@ -150,6 +154,8 @@ def fetch_daily_bars(
             )
         )
         pieces.append(bars_frame_to_table(result.df))
+        bar.update(len(unique[offset:offset + chunk_size]))
+    bar.close()
     if not pieces:
         return pd.DataFrame(columns=list(BAR_COLUMNS))
     return pd.concat(pieces, ignore_index=True)

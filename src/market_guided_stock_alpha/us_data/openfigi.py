@@ -8,6 +8,8 @@ from typing import Any, Callable, Dict, List, Optional, Sequence
 
 import pandas as pd
 
+from market_guided_stock_alpha.progress import progress
+
 
 OPENFIGI_URL = "https://api.openfigi.com/v3/mapping"
 OPENFIGI_EXCHANGE = "US"
@@ -141,6 +143,7 @@ def map_tickers(
     tickers = [str(value) for value in tickers]
     rows = []
     interval = 60.0 / MAX_REQUESTS_PER_MINUTE
+    bar = progress(total=len(tickers), desc="OpenFIGI mapping", unit="ticker")
     for start in range(0, len(tickers), MAX_JOBS_PER_REQUEST):
         if start:
             sleep(interval)
@@ -155,4 +158,6 @@ def map_tickers(
         ]
         results = _post(jobs, api_key, opener, sleep)
         rows.extend(_row(ticker, result) for ticker, result in zip(batch, results))
+        bar.update(len(batch))
+    bar.close()
     return pd.DataFrame(rows, columns=list(OPENFIGI_COLUMNS))

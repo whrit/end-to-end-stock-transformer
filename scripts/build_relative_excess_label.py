@@ -24,6 +24,7 @@ from market_guided_stock_alpha.labels.relative_excess_return import (
     build_relative_excess_label,
     formula_metadata,
 )
+from market_guided_stock_alpha.progress import note
 from market_guided_stock_alpha.storage import (
     is_remote,
     materialize,
@@ -104,6 +105,7 @@ def build_from_files(
         }
         local_output = _staging(output_path, cache, "output")
         local_manifest = _staging(manifest_path, cache, "manifest")
+        note("computing relative excess label (vectorized; no per-step progress)")
         output, diagnostics = build_relative_excess_label(
             read_table(inputs["stock_daily"][1]),
             read_table(inputs["benchmark_daily"][1]),
