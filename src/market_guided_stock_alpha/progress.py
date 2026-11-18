@@ -710,7 +710,22 @@ def _system_table() -> Table:
             if torch.backends.mps.is_available():
                 table.add_row("MPS", Text(_binary(torch.mps.driver_allocated_memory())))
             elif torch.cuda.is_available():
-                table.add_row("CUDA", Text(_binary(torch.cuda.memory_allocated())))
+                # Between steps only weights/optimizer state are allocated; per-step
+                # activations come and go, so also show the peak and what the process holds.
+                _free, total = torch.cuda.mem_get_info()
+                reserved = torch.cuda.memory_reserved()
+                table.add_row(
+                    "CUDA",
+                    _gauge(
+                        reserved / total,
+                        "{} in use · peak {} · {} held of {}".format(
+                            _binary(torch.cuda.memory_allocated()),
+                            _binary(torch.cuda.max_memory_allocated()),
+                            _binary(reserved),
+                            _binary(total),
+                        ),
+                    ),
+                )
         except Exception:  # GPU stats are best-effort decoration
             pass
     disk = shutil.disk_usage(tempfile.gettempdir())
