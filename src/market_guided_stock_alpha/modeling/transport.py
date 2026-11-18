@@ -1,6 +1,7 @@
 """Thin whole-date tensor transport from canonical dataset samples."""
 
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, Iterator, List, Mapping, Optional, Tuple
@@ -11,7 +12,7 @@ import psutil
 import torch
 
 from market_guided_stock_alpha.dataset.dataset import SequenceSample
-from market_guided_stock_alpha.progress import note, progress
+from market_guided_stock_alpha.progress import duration_text, note, progress
 
 GIB = 1024 ** 3
 # Safety margins for the epoch cache (used on CUDA only; see WholeDateLoader).
@@ -234,6 +235,7 @@ class WholeDateLoader:
         return adapt_sequence_sample(value, device)
 
     def _fill_cache(self) -> List[Optional[DateBatch]]:
+        started = time.monotonic()
         gpu_left = gpu_cache_budget(self.device)
         ram_left = ram_cache_budget()
         cpu = torch.device("cpu")
@@ -255,8 +257,8 @@ class WholeDateLoader:
                     cached.append(None)
         rebuilt = sum(1 for batch in cached if batch is None)
         note(
-            "cached {} dates: {:.1f} GiB on GPU, {:.1f} GiB in RAM{}".format(
-                len(cached) - rebuilt, sizes["GPU"] / GIB, sizes["RAM"] / GIB,
+            "cached {} dates in {}: {:.1f} GiB on GPU, {:.1f} GiB in RAM{}".format(
+                len(cached) - rebuilt, duration_text(time.monotonic() - started), sizes["GPU"] / GIB, sizes["RAM"] / GIB,
                 ", {} rebuilt each epoch (memory limit)".format(rebuilt) if rebuilt else "",
             )
         )

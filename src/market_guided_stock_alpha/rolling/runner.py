@@ -356,9 +356,14 @@ class _RunMonitor(object):
         self.seed_started.setdefault(int(seed), self.started)
         if not self.done[int(seed)]:
             self.curve, self.marks = [], []
-        self.bar.set_postfix_str("seed {} · target {}".format(seed, target.target_id))
+        self.label = "seed {} · target {}".format(seed, target.target_id)
+        self.bar.set_postfix_str(self.label)
         self._estimate(int(seed))
         self._show(int(seed), target.target_id)
+
+    def phase(self, text: str) -> None:
+        """Show what the current target is doing on the run bar."""
+        self.bar.set_postfix_str("{} · {}".format(self.label, text))
 
     def finish(
         self,
@@ -461,6 +466,13 @@ class _RunMonitor(object):
             board(table, "TARGETS · seed {}".format(seed))
 
 
+def _prepared_note(target_id: str, statistics_seconds: float, dataset_seconds: float) -> None:
+    note(
+        ("  prepared {} ".format(target_id), "dim"),
+        ("statistics {} · datasets {}".format(duration_text(statistics_seconds), duration_text(dataset_seconds)), "cyan"),
+    )
+
+
 def _build_dataset(
     data: RollingDataBundle,
     layout: FeatureLayout,
@@ -540,6 +552,8 @@ class RollingRunner:
                 prediction_path = target_root / "predictions.pkl"
                 metrics_path = target_root / "metrics.json"
 
+                monitor.phase("fitting statistics")
+                prepared = time.monotonic()
                 statistics = fit_dataset_statistics(
                     layout,
                     data.alpha158,
@@ -549,6 +563,7 @@ class RollingRunner:
                     data.intraday_price_volume,
                     data.intraday_market,
                 )
+                statistics_seconds = time.monotonic() - prepared
                 preprocessing_state = preprocessing_to_dict(statistics)
                 seed_everything(int(seed), True)
                 model = model_factory(layout, int(seed))
@@ -588,6 +603,8 @@ class RollingRunner:
                         checkpoint_manager,
                         previous_best,
                     )
+                    monitor.phase("building datasets")
+                    built = time.monotonic()
                     train_dataset = _build_dataset(
                         data, layout, statistics, target.train_dates, config.minimum_security_count
                     )
@@ -597,6 +614,8 @@ class RollingRunner:
                     test_dataset = _build_dataset(
                         data, layout, statistics, target.test_dates, config.minimum_security_count
                     )
+                    _prepared_note(target.target_id, statistics_seconds, time.monotonic() - built)
+                    monitor.phase("training")
                     trainer = Trainer(
                         model,
                         training_config,
@@ -751,6 +770,8 @@ class RollingRunner:
                 training_record_path = target_root / "training.json"
                 prediction_path = target_root / "predictions.pkl"
                 metrics_path = target_root / "metrics.json"
+                monitor.phase("fitting statistics")
+                prepared = time.monotonic()
                 statistics = fit_dataset_statistics(
                     layout,
                     data.alpha158,
@@ -760,6 +781,7 @@ class RollingRunner:
                     data.intraday_price_volume,
                     None,
                 )
+                statistics_seconds = time.monotonic() - prepared
                 preprocessing_state = preprocessing_to_dict(statistics)
                 identity = {
                     "run": public_identity,
@@ -790,6 +812,8 @@ class RollingRunner:
                 if not resumed:
                     target_root.mkdir(parents=True, exist_ok=True)
                     save_preprocessing(preprocessing_path, statistics)
+                    monitor.phase("building datasets")
+                    built = time.monotonic()
                     train_dataset = _build_dataset(
                         data, layout, statistics, target.train_dates, config.minimum_security_count
                     )
@@ -799,6 +823,8 @@ class RollingRunner:
                     test_dataset = _build_dataset(
                         data, layout, statistics, target.test_dates, config.minimum_security_count
                     )
+                    _prepared_note(target.target_id, statistics_seconds, time.monotonic() - built)
+                    monitor.phase("training")
                     model.fit_rolling(train_dataset, valid_dataset, training_config, int(seed))
                     model.save_model(model_path)
                     record = dict(model.training_record or {})
