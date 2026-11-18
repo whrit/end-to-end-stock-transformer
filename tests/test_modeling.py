@@ -23,6 +23,7 @@ from market_guided_stock_alpha.modeling import (
     MasterModel,
     VanillaTransformerRegressor,
     adapt_sequence_sample,
+    assemble_supervised_matrix,
     flatten_sequence_sample,
     forward_date_batch,
     lightgbm_feature_order,
@@ -148,6 +149,21 @@ class BaselineAndExperimentalTest(unittest.TestCase):
         self.assertEqual(
             flat[0, anchor_offset], value.stock_features[0, -1, 0]
         )
+
+    def test_lightgbm_rows_match_masked_concatenation(self):
+        layout = FeatureLayout.stage1()
+        days = []
+        for position in range(3):
+            value = sample(layout, 3)
+            value.stock_features[:, :, 0] += position
+            value.label_mask[position % 3] = False  # a different row dropped each day
+            days.append(value)
+        assembled = assemble_supervised_matrix(days)
+        expected = np.concatenate(
+            [flatten_sequence_sample(value)[value.label_mask] for value in days]
+        )
+        np.testing.assert_array_equal(assembled["features"], expected)
+        self.assertEqual(assembled["row_ptr"].tolist(), [0, 2, 4, 6])
 
     @unittest.skipUnless(
         importlib.util.find_spec("lightgbm") is not None,

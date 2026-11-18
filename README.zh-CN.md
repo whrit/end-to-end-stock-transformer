@@ -374,6 +374,8 @@ uv run --env-file .env scripts/remote.py pull JOB     # 把运行目录下载到
 
 `submit` 会按原样发送工作区（包括未提交的修改），并记录其基于的 commit。`--resume` 与 `--compare` 的含义与 `run_rolling.py` 相同，`--device` 默认为 `cuda`。已停止的任务可以用 `remote.py submit … --resume` 在任意 GPU 或本机继续。CUDA 结果与 MPS/CPU 结果只在最后几位小数上有差异。
 
+超参数搜索：`scripts/sweep.py make` 从一个基础配置为每个网格点生成一个配置（`--fix` 与 `--grid` 接受点分隔的键和 JSON 值），`scripts/sweep.py compare <runs 根目录> --prefix <名称>` 按样本外 rank IC 对已完成的运行排序。美股调参流程见 `docs/us_phase2_plan.md`（Gap C）。
+
 ### 自定义实验配置
 
 如果要运行自己的实验，可以先从 `configs/` 中复制一个最接近目标设置的 JSON 配置文件，修改 `experiment_name` 和数据路径，再按需要调整项目特有的配置项。

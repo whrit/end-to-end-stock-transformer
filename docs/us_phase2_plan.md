@@ -93,9 +93,9 @@ So the survivorship gap is a **missing ticker list**, not missing prices. Fixing
 **Problem.** The US configs copy the China settings (MASTER d512, β=10, lr 1e-5, dropout 0.5, MSE, semiannual). US cross-sections are smaller, about 3,000–4,500 stocks after filters [INFERENCE], and the market regime differs.
 
 **Protocol** (no peeking at the test period):
-1. **Pilot first.** Run one seed of `master_d512_us_market63`. Record wall time per target and validation rank IC. That timing sets the sweep budget.
+1. **Pilot first.** Run one seed of `master_d512_us_market63`. Record wall time per target and validation rank IC. That timing sets the sweep budget. **Done (2026-11-18, RTX 4080):** 8 targets in 2 h 08 min, 10–29 min per target. Test rank IC +0.0357, IC +0.0386, top10 +0.0010. The best validation epoch was 1–3 in 4 of 8 targets.
 2. **Tuning period = 2019–2022 targets only.** Use a separate config with `test_start: 2019-01-01, test_end: 2022-12-31`. The 2023+ test period is evaluated **once**, after choices are frozen.
-3. **Sweep.** One seed each, about 18 configs:
+3. **Sweep.** One seed each, in stages; `scripts/sweep.py make` writes the configs and `scripts/sweep.py compare` ranks the finished runs on out-of-sample rank IC over the tuning window. **Stage A is ready:** `configs/us/secondary/tune_us_d{128,256,512}_lr{1e-05,3e-05,0.0001}.json`, 9 configs with β 10, MSE, dropout 0.5. Later stages are generated from the stage A winner:
 
    | Knob | Values |
    |---|---|
@@ -104,8 +104,8 @@ So the survivorship gap is a **missing ticker list**, not missing prices. Fixing
    | `learning_rate` | 1e-5, 3e-5, 1e-4 |
    | `loss` | mse, listfold (only on the best two `d_model`) |
    | `dropout` | 0.3, 0.5 (only on the best config) |
-4. **Confirm.** Rerun the top two with 3 seeds and pick on mean validation rank IC (ties → smaller model).
-5. **Baselines.** Add US configs for the same windows: `lightgbm_us_market63` (needs `uv sync --extra lightgbm`), `gru_us_market63` and `transformer_us_market63`. MASTER should be judged against these, not in isolation.
+4. **Confirm.** Rerun the top two with 3 seeds and pick on mean out-of-sample rank IC over the tuning window (ties → smaller model). Validation rank IC is not the selector, because early stopping already chose the epoch on it.
+5. **Baselines.** US configs: `configs/us/stage1/lightgbm_us_market63.json` and `gru_us_market63.json` (same data, window and seeds as `master_d512_us_market63`). These use the 2023+ test window so they can be compared with the pilot; they must not drive tuning choices. `transformer_us_market63` is not added yet. LightGBM flattens 8 days × 221 features, so 1,768 columns per stock-day: about 32 GB of float32 for the last target's ~4.5M training rows. Assembly frees each day as it copies, and the raw matrix is dropped once LightGBM has binned it, so expect a peak of about 45 GB; rent with `--min-ram 64`. `num_threads: 0` means every CPU the container's quota allows.
 6. **Rolling frequency.** Compare semiannual and quarterly on the winning config.
 
 **Files:** `configs/us/secondary/*.json` (sweep and tuning configs), `configs/us/stage1/` (baselines and the final choice). Results go under `results/us/` with the same CSV layout as China.

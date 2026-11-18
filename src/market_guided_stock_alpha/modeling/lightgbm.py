@@ -8,6 +8,7 @@ import numpy as np
 
 from market_guided_stock_alpha.dataset.dataset import SequenceSample
 from market_guided_stock_alpha.dataset.layout import FeatureLayout
+from market_guided_stock_alpha.modeling.transport import usable_cpu_count
 from market_guided_stock_alpha.progress import metric as show_metric, progress, reset_metrics
 from market_guided_stock_alpha.training.config import LightGBMTrainingConfig
 from market_guided_stock_alpha.training.metrics import daily_rank_ic
@@ -86,6 +87,10 @@ class LightGBMRegressor:
         if type(seed) is not int or seed < 0:
             raise ValueError("LightGBM seed must be a non-negative integer")
         result = dict(parameters)
+        if result.get("num_threads") == 0:
+            # 0 = every CPU this job may use (container quota aware), not
+            # OpenMP's host-wide default.
+            result["num_threads"] = usable_cpu_count()
         result.update(
             {
                 "seed": seed,
@@ -156,13 +161,16 @@ class LightGBMRegressor:
         parameters = self._effective_parameters(config.parameters, seed)
         train_set = lightgbm.Dataset(
             train["features"], label=train["labels_processed"], params=parameters
-        )
+        ).construct()
         valid_set = lightgbm.Dataset(
             valid["features"],
             label=valid["labels_processed"],
             reference=train_set,
             params=parameters,
-        )
+        ).construct()
+        # LightGBM now holds binned copies; the float32 matrices (tens of GB for
+        # 8 days x 1,768 columns on US data) are not needed while boosting.
+        del train["features"], valid["features"]
 
         def validation_feval(predictions: Any, _dataset: Any):
             metrics = self._validation_metrics(
@@ -285,7 +293,11 @@ class LightGBMRegressor:
 
 
 def assemble_supervised_matrix(dataset: Any) -> Dict[str, np.ndarray]:
-    """Flatten all supervised rows while preserving daily validation boundaries."""
+    """Flatten all supervised rows while preserving daily validation boundaries.
+
+    Each day's rows are freed as they are copied into the preallocated output,
+    so peak memory is about one copy of the matrix plus one day, not two copies.
+    """
     features = []
     processed = []
     raw = []
@@ -307,8 +319,12 @@ def assemble_supervised_matrix(dataset: Any) -> Dict[str, np.ndarray]:
         row_ptr.append(row_ptr[-1] + int(mask.sum()))
     if not features or row_ptr[-1] <= 0:
         raise ValueError("LightGBM dataset contains no supervised row")
+    output = np.empty((row_ptr[-1], features[0].shape[1]), dtype="float32")
+    features.reverse()
+    for start, end in zip(row_ptr[:-1], row_ptr[1:]):
+        output[start:end] = features.pop()
     return {
-        "features": np.ascontiguousarray(np.concatenate(features), dtype="float32"),
+        "features": output,
         "labels_processed": np.concatenate(processed).astype("float32", copy=False),
         "labels_raw": np.concatenate(raw).astype("float64", copy=False),
         "row_ptr": np.asarray(row_ptr, dtype="int64"),

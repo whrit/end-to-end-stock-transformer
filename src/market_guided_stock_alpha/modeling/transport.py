@@ -179,12 +179,34 @@ def gpu_cache_budget(device: torch.device) -> int:
     return max(0, int(free) - max(GPU_RESERVE_MIN, int(GPU_RESERVE_FRACTION * total)))
 
 
-def _cache_workers() -> int:
+def usable_cpu_count() -> int:
+    """CPUs this process may really use: its affinity, capped by a container CPU quota.
+
+    Containers (e.g. vast.ai) often show every host core while a cgroup quota
+    limits how many run at once; oversubscribing them slows OpenMP badly."""
     try:
         count = len(os.sched_getaffinity(0))
     except AttributeError:  # macOS
         count = os.cpu_count() or 1
-    return max(1, min(count, MAX_CACHE_WORKERS))
+    for path in ("/sys/fs/cgroup/cpu.max", "/sys/fs/cgroup/cpu/cpu.cfs_quota_us"):
+        try:
+            with open(path) as handle:
+                fields = handle.read().split()
+            if path.endswith("cpu.max"):
+                quota, period = fields[0], fields[1]
+            else:
+                with open("/sys/fs/cgroup/cpu/cpu.cfs_period_us") as handle:
+                    quota, period = fields[0], handle.read().strip()
+        except (OSError, IndexError):
+            continue
+        if quota not in ("max", "-1") and int(period) > 0:
+            count = min(count, max(1, int(quota) // int(period)))
+        break
+    return max(1, count)
+
+
+def _cache_workers() -> int:
+    return max(1, min(usable_cpu_count(), MAX_CACHE_WORKERS))
 
 
 def _batch_bytes(batch: DateBatch) -> int:

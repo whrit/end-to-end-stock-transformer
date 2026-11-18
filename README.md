@@ -372,6 +372,8 @@ uv run --env-file .env scripts/remote.py pull JOB     # download the run folder 
 
 `submit` sends your working tree as it is, uncommitted edits included, and records the commit it was based on. `--resume` and `--compare` behave as in `run_rolling.py`, and `--device` defaults to `cuda`. A stopped job continues with `remote.py submit … --resume`, on any GPU or locally. CUDA results match MPS or CPU runs only up to the last decimals.
 
+For hyperparameter sweeps, `scripts/sweep.py make` writes one config per grid point from a base config (`--fix` and `--grid` take dotted keys and JSON values), and `scripts/sweep.py compare <runs root> --prefix <name>` ranks finished runs by out-of-sample rank IC. See `docs/us_phase2_plan.md` (Gap C) for the US tuning protocol.
+
 ### Custom Experiment Configuration
 
 To run a custom experiment, copy the closest JSON config under `configs/`, update `experiment_name` and the data paths, and then modify the project-specific settings as needed.
