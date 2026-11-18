@@ -96,6 +96,7 @@ COMPACT_HEIGHT = 35
 STATUS_INTERVAL_SECONDS = 30.0
 NOTIFY_MIN_SECONDS = 60.0
 KEY_HINTS = "s stop after target · ↑↓ scroll · G live · t filter · Ctrl-C abort"
+STOPPED_EXIT_CODE = 3  # graceful stop: outputs saved, resumable with --resume
 _DEPTH_STYLES = ("bold cyan", "magenta", "blue", "bright_black")
 
 _console = Console(stderr=True, highlight=False)
@@ -334,7 +335,7 @@ def run_main(main: Callable[[], Any]) -> int:
 
     A ``SystemExit`` message (``raise SystemExit("error: ...")``) then appears
     after the summary instead of vanishing with the full-screen view, and a
-    graceful stop (``s``) exits 0 with a resume hint.
+    graceful stop (``s``) exits ``STOPPED_EXIT_CODE`` (3) with a resume hint.
     """
     global _job_mode
     _job_mode = True
@@ -343,7 +344,7 @@ def run_main(main: Callable[[], Any]) -> int:
     except StopRequested as stop:
         _shutdown("STOPPED")
         _console.print(Text(str(stop), style="bold yellow"))
-        return 0
+        return STOPPED_EXIT_CODE
     except SystemExit as exit_request:
         _shutdown("DONE" if exit_request.code in (None, 0) else "FAILED")
         raise
@@ -863,7 +864,32 @@ def _status_loop() -> None:
     while not _finished:
         time.sleep(STATUS_INTERVAL_SECONDS)
         if not _finished:
+            _check_control()
             _write_status()
+
+
+def _check_control() -> None:
+    """Honour a remote stop request (``MGSA_CONTROL``, set by the job agent)."""
+    location = os.environ.get("MGSA_CONTROL")
+    if not location or _stop.is_set() or not _stoppable:
+        return
+    try:
+        from market_guided_stock_alpha import storage  # lazy: storage imports this module
+
+        if storage.is_remote(location):
+            with tempfile.TemporaryDirectory() as directory:
+                text = storage.materialize(location, Path.cwd(), Path(directory), quiet=True).read_text(encoding="utf-8")
+        else:
+            text = Path(location).read_text(encoding="utf-8")
+    except (FileNotFoundError, OSError):
+        return
+    try:
+        requested = bool(json.loads(text).get("stop"))
+    except ValueError:
+        return
+    if requested:
+        _stop.set()
+        note(("■ remote stop requested: finishing the current target, then saving", "bold yellow"))
 
 
 def snapshot_view(snapshot: Mapping[str, Any], width: int) -> Dict[str, Any]:

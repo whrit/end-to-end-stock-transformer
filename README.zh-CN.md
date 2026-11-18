@@ -270,6 +270,100 @@ uv run pytest
 
 仓库不包含原始市场数据。请按照[公开数据契约](docs/data_contract.md)准备自己的数据；以上路径仅为示例。
 
+### 美股（Alpaca + Cloudflare R2）
+
+美股流程与 A 股流程并行。数据来自 Alpaca（全交易所行情，2016 年起），股票用 OpenFIGI 的 share-class FIGI 标识，所有数据存放在 Cloudflare R2。任务使用临时本地缓存，结束后自动删除。详见[美股数据契约](docs/data_contract.md#us-equities-profile)。
+
+密钥放在仓库根目录、已被 git 忽略的 `.env` 中，用 `uv run --env-file .env` 加载；也可以在 shell 中 `export UV_ENV_FILE=.env` 设为默认。
+
+```bash
+uv sync --extra us
+cat > .env <<'EOF'
+APCA_API_KEY_ID=...
+APCA_API_SECRET_KEY=...
+# APCA_PAPER=false     # 仅当这是实盘账户的密钥时
+OPENFIGI_API_KEY=...
+R2_ACCOUNT_ID=...
+R2_ACCESS_KEY_ID=...
+R2_SECRET_ACCESS_KEY=...
+EOF
+R=r2://stock-transformer-data/us/v1
+
+uv run --env-file .env scripts/fetch_us_daily.py --output $R/raw     # 冒烟测试：--symbols AAPL,MSFT,NVDA --output r2://.../us/smoke/raw
+uv run --env-file .env scripts/build_relative_excess_label.py --stock-daily $R/raw/daily_stock.parquet \
+  --benchmark-daily $R/raw/daily_index_us_market63.parquet --calendar $R/raw/calendar.parquet \
+  --benchmark-code SPY.US --output $R/derived/relative_excess_return_5d.pkl
+uv run --env-file .env scripts/build_daily_features.py alpha158 --input $R/raw/daily_stock.parquet \
+  --dtype float32 --membership $R/raw/membership.parquet --output $R/derived/alpha158
+uv run --env-file .env scripts/build_daily_features.py us_market63 --input $R/raw/daily_index_us_market63.parquet --output $R/derived/us_market63
+uv run --env-file .env scripts/run_rolling.py configs/us/stage1/master_d512_us_market63.json --resume
+```
+
+R2 输出不可覆盖：脚本拒绝写入已存在的位置，因此每个新数据版本请使用新的前缀（例如 `us/v2`）。自带的美股配置使用名为 `stock-transformer-data` 的 bucket；若你的 bucket 名不同，请修改其中的 `r2://` 路径。美股流程目前覆盖 Stage 1（日频特征），其余工作（幸存者偏差、退市收益、美股调参、390 根分钟线特征）见 [docs/us_phase2_plan.md](docs/us_phase2_plan.md)。
+
+### 终端仪表盘
+
+所有长时间任务（数据抓取、标签与特征构建、rolling 训练）都会打开一个全屏终端仪表盘，包括：
+- 带时钟、已用时间和预计剩余时间（ETA）的标题栏；
+- 嵌套进度条；
+- 带 ▲▼ 变化和走势线的实时训练指标；
+- 带时间戳的事件流（tape）；
+- 任务面板：抓取阶段与数据质量计数、构建质量，或 target 一览表（DONE/TRAIN/QUEUED 及按正负着色的测试结果）；
+- 多 seed 运行时的跨 seed 对比表；
+- 累计每日 rank IC 与多空十分位价差的曲线图；
+- 系统负载（CPU、内存、GPU 显存、磁盘）；
+- 滚动的结果行情条。
+
+运行时的按键：
+- `s`：在当前 target 完成后干净地停止 rolling 运行，之后用 `--resume` 继续。
+- `↑`/`↓` 滚动事件流，`G` 回到实时位置。
+- `t` 在全部事件和重要事件之间切换。
+
+终端宽度小于 130 列或高度小于 35 行时自动切换为紧凑布局。任务结束后摘要会保留在终端滚动记录中，macOS 上还会弹出通知。rolling 运行还会在运行目录中写入 `dashboard.log`（完整事件记录）和 `dashboard_status.json`。
+
+在另一台机器上查看运行状态：
+
+```bash
+uv run --env-file .env scripts/watch.py r2://stock-transformer-data/us/v1/runs/<experiment>/dashboard_status.json
+```
+
+`run_rolling.py --compare <之前的运行目录>` 会增加一列相对参照运行（例如 LightGBM 基线）的 Δ rank IC。
+
+环境变量：
+- `PROGRESS_DISABLE=1`：输出纯文本日志。
+- `NO_COLOR=1`：关闭颜色。
+- `DASHBOARD_ACCENT=green`：更换主题色。
+- `DASHBOARD_NOTIFY=0`：关闭通知。
+- `DASHBOARD_LOG` 和 `DASHBOARD_STATUS`：为任意任务指定日志文件和状态文件位置。
+
+在 MPS 上出现 PyTorch 警告 `index_put_with_accumulate_mps does not have a deterministic implementation` 属于预期情况，不影响结果。
+
+### 在租用 GPU 上训练（例如 vast.ai）
+
+每个 GPU 实例上运行一个小型 agent，从 R2 中领取排队的任务，因此无需 ssh 登录或拷贝文件：代码以快照形式上传，数据从 R2 读取，结果写入配置中的 `r2://` 运行目录。实例的销毁由你自己负责。
+
+用交互式选择器租用 GPU（agent 会预先装好）：
+
+```bash
+uv run --env-file .env scripts/remote.py rent        # 按条件筛选报价，列表展示，选择编号，确认后租用；可选随即提交任务
+uv run --env-file .env scripts/remote.py instances   # 你的 vast.ai 实例及其 agent 是否在线
+```
+
+vast.ai 密钥读取自 `VAST_API_KEY` 或 `vastai` CLI 已保存的密钥。R2 密钥会作为环境变量传给实例；主机由第三方提供，建议使用仅限此 bucket 的 R2 token。若你在 vast.ai 网页上自行创建实例，先运行 `scripts/remote.py setup`，把打印出的环境变量和启动脚本填入模板。
+
+在本机上：
+
+```bash
+uv run --env-file .env scripts/remote.py submit configs/us/stage1/master_d512_us_market63.json   # 提交任务并打开仪表盘
+uv run --env-file .env scripts/remote.py list         # 任务列表，以及在线的 agent 与 GPU
+uv run --env-file .env scripts/remote.py watch JOB    # 重新连接；Ctrl-C 只是断开查看
+uv run --env-file .env scripts/remote.py logs JOB -f  # 完整任务输出
+uv run --env-file .env scripts/remote.py stop JOB     # 完成当前 target、保存后退出（尚在排队则直接取消）
+uv run --env-file .env scripts/remote.py pull JOB     # 把运行目录下载到 ./runs/<experiment>（加 --checkpoints 包含模型文件）
+```
+
+`submit` 会按原样发送工作区（包括未提交的修改），并记录其基于的 commit。`--resume` 与 `--compare` 的含义与 `run_rolling.py` 相同，`--device` 默认为 `cuda`。已停止的任务可以用 `remote.py submit … --resume` 在任意 GPU 或本机继续。CUDA 结果与 MPS/CPU 结果只在最后几位小数上有差异。
+
 ### 自定义实验配置
 
 如果要运行自己的实验，可以先从 `configs/` 中复制一个最接近目标设置的 JSON 配置文件，修改 `experiment_name` 和数据路径，再按需要调整项目特有的配置项。

@@ -8,7 +8,7 @@ path semantics and never import boto3.
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, List, Tuple
 
 from market_guided_stock_alpha.progress import progress
 
@@ -135,6 +135,33 @@ def materialize(
         for child in children:
             _download(client, bucket, child, cache_dir, bar)
     return Path(cache_dir, bucket, *key.split("/"))
+
+
+def download_tree(
+    location: str, destination: Path, skip: Any = None, client: Any = None
+) -> List[Path]:
+    """Download every object under an R2 prefix into ``destination``, keeping
+    relative paths; ``skip(relative_path) -> bool`` excludes objects."""
+    bucket, key = parse_r2_uri(location)
+    if client is None:
+        client = r2_client_from_env()
+    prefix = key.rstrip("/") + "/"
+    keys = {
+        item: size
+        for item, size in _list_keys(client, bucket, prefix).items()
+        if not item.endswith("/") and not (skip is not None and skip(item[len(prefix):]))
+    }
+    if not keys:
+        raise FileNotFoundError("nothing to download at {}".format(location))
+    written = []
+    with _byte_bar("download", location, sum(keys.values())) as bar:
+        for item in sorted(keys):
+            relative = _validate_key(item[len(prefix):], location)
+            target = Path(destination, *relative.split("/"))
+            target.parent.mkdir(parents=True, exist_ok=True)
+            client.download_file(bucket, item, str(target), Callback=bar.update)
+            written.append(target)
+    return written
 
 
 def publish(

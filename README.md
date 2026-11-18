@@ -336,6 +336,32 @@ Environment variables:
 
 On MPS, the PyTorch warning `index_put_with_accumulate_mps does not have a deterministic implementation` is expected and harmless.
 
+### Training on a rented GPU (e.g. vast.ai)
+
+Each GPU instance runs a small agent that takes queued jobs from R2, so you never ssh in or copy files: the code goes up as a snapshot, the data comes from R2, and results go to the config's `r2://` run folder. Destroying instances is up to you.
+
+Rent a GPU with an interactive picker (the agent comes preinstalled):
+
+```bash
+uv run --env-file .env scripts/remote.py rent        # filter offers, list them, pick a number, confirm, rent; optionally submit right away
+uv run --env-file .env scripts/remote.py instances   # your vast.ai instances and whether their agent is online
+```
+
+The vast.ai key comes from `VAST_API_KEY` or the `vastai` CLI's saved key. The R2 keys are passed to the instance as environment variables, and hosts are third parties, so a token limited to this bucket is best. If you create an instance yourself on the vast.ai website instead, run `scripts/remote.py setup` and paste the printed environment variables and start command into your template.
+
+From the laptop:
+
+```bash
+uv run --env-file .env scripts/remote.py submit configs/us/stage1/master_d512_us_market63.json   # queue it and watch the dashboard
+uv run --env-file .env scripts/remote.py list         # jobs, plus which agents and GPUs are online
+uv run --env-file .env scripts/remote.py watch JOB    # reattach; Ctrl-C only detaches
+uv run --env-file .env scripts/remote.py logs JOB -f  # full job output
+uv run --env-file .env scripts/remote.py stop JOB     # finish the current target, save, exit (cancels if still queued)
+uv run --env-file .env scripts/remote.py pull JOB     # download the run folder to ./runs/<experiment> (add --checkpoints for model files)
+```
+
+`submit` sends your working tree as it is, uncommitted edits included, and records the commit it was based on. `--resume` and `--compare` behave as in `run_rolling.py`, and `--device` defaults to `cuda`. A stopped job continues with `remote.py submit … --resume`, on any GPU or locally. CUDA results match MPS or CPU runs only up to the last decimals.
+
 ### Custom Experiment Configuration
 
 To run a custom experiment, copy the closest JSON config under `configs/`, update `experiment_name` and the data paths, and then modify the project-specific settings as needed.
