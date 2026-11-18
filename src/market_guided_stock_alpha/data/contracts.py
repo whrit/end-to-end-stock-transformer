@@ -29,7 +29,11 @@ MINUTE_STOCK_COLUMNS = ("timestamp", "sec_code") + MINUTE_FIELDS
 MINUTE_INDEX_COLUMNS = ("timestamp", "index_code") + MINUTE_FIELDS
 MEMBERSHIP_COLUMNS = ("trade_date", "sec_code")
 CALENDAR_COLUMNS = ("calendar_date", "is_open")
-_SECURITY_CODE = re.compile(r"^\d{6}\.(SH|SZ|BJ)$", re.IGNORECASE)
+US_SECURITY_CODE_PATTERN = r"BBG[0-9A-Z]{9}|[A-Z][A-Z0-9]{0,5}(\.[A-Z])?\.US"
+US_SECURITY_CODE = re.compile(r"^({})$".format(US_SECURITY_CODE_PATTERN))
+_SECURITY_CODE = re.compile(
+    r"^(\d{{6}}\.(SH|SZ|BJ)|{})$".format(US_SECURITY_CODE_PATTERN)
+)
 
 
 class SchemaError(ValueError):
@@ -47,9 +51,8 @@ def normalize_security_code(value: Any, context: str = "security code") -> str:
     text = str(value).strip().upper()
     if not text or _SECURITY_CODE.fullmatch(text) is None:
         raise DataQualityError(
-            "{}={!r} is not NNNNNN.SH/SZ/BJ; exchange guessing is disabled".format(
-                context, value
-            )
+            "{}={!r} is not NNNNNN.SH/SZ/BJ, BBG FIGI, or TICKER.US; "
+            "exchange guessing is disabled".format(context, value)
         )
     return text
 

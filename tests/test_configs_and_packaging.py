@@ -59,6 +59,24 @@ class ConfigAndPackagingTest(unittest.TestCase):
                 document, _validated = load_experiment_config(path)
                 data = dict(document["data"])
                 self.assertIn("label_manifest", data)
+                if str(document["output_root"]).startswith("r2://"):
+                    buckets = set()
+                    for name, value in data.items():
+                        if name == "label_column":
+                            continue
+                        self.assertTrue(str(value).startswith("r2://"), name)
+                        buckets.add(str(value)[len("r2://"):].split("/", 1)[0])
+                    buckets.add(
+                        str(document["output_root"])[len("r2://"):].split("/", 1)[0]
+                    )
+                    self.assertEqual(len(buckets), 1)
+                    self.assertTrue(
+                        data["label_manifest"].endswith(
+                            "/derived/relative_excess_return_5d.manifest.json"
+                        )
+                    )
+                    self.assertTrue(document["output_root"].endswith("/runs"))
+                    continue
                 for name, value in data.items():
                     if name == "label_column":
                         continue

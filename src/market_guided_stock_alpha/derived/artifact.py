@@ -57,6 +57,18 @@ def _array_file(family: str) -> str:
     return "{}_raw.npy".format(family)
 
 
+# Bound per-pass temporaries (isinf/isfinite masks) to ~32M elements so a
+# disk-backed [D,S,F] array is scanned without materializing full-size masks.
+_SCAN_ELEMENTS = 32 * 1024 * 1024
+
+
+def _row_blocks(raw: np.ndarray):
+    per_row = max(1, int(np.prod(raw.shape[1:])))
+    step = max(1, _SCAN_ELEMENTS // per_row)
+    for start in range(0, raw.shape[0], step):
+        yield slice(start, start + step)
+
+
 def write_feature_artifact(
     path: Path,
     family: str,
@@ -67,8 +79,14 @@ def write_feature_artifact(
     source_observed: Optional[np.ndarray] = None,
     bar_coverage: Optional[np.ndarray] = None,
     provenance: Optional[Mapping[str, Any]] = None,
+    adopt_values_file: bool = False,
 ) -> Dict[str, Any]:
-    """Publish one immutable derived artifact directory atomically."""
+    """Publish one immutable derived artifact directory atomically.
+
+    With ``adopt_values_file`` the values must be an ``np.lib.format.open_memmap``
+    ``.npy`` on the target's filesystem; that file is moved into the artifact
+    instead of being copied, so large builds never hold two copies on disk.
+    """
     target = Path(path)
     if target.exists():
         raise FileExistsError("artifact target already exists: {}".format(target))
@@ -78,10 +96,16 @@ def write_feature_artifact(
     names = tuple(str(name) for name in feature_names)
     if not names or len(names) != len(set(names)):
         raise ValueError("artifact feature names must be non-empty and unique")
-    raw = np.asarray(values)
+    if adopt_values_file and not (
+        isinstance(values, np.memmap)
+        and values.filename is not None
+        and str(values.filename).endswith(".npy")
+    ):
+        raise ValueError("adopt_values_file requires an open_memmap .npy array")
+    raw = values if adopt_values_file else np.asarray(values)
     if raw.ndim not in (2, 3) or raw.shape[-1] != len(names):
         raise ValueError("artifact values must be [D,F] or [D,S,F]")
-    if np.isinf(raw).any():
+    if any(np.isinf(raw[block]).any() for block in _row_blocks(raw)):
         raise ValueError("artifact values must not contain infinity")
     date_ids = dates_to_epoch_days(dates)
     if len(date_ids) == 0:
@@ -108,7 +132,9 @@ def write_feature_artifact(
     )
     if observed.shape != row_shape:
         raise ValueError("source_observed shape does not match artifact rows")
-    finite_count = np.isfinite(raw).sum(axis=-1).astype("uint16")
+    finite_count = np.empty(row_shape, dtype="uint16")
+    for block in _row_blocks(raw):
+        finite_count[block] = np.isfinite(raw[block]).sum(axis=-1)
     coverage = None
     if bar_coverage is not None:
         coverage = np.asarray(bar_coverage, dtype="float32")
@@ -129,12 +155,19 @@ def write_feature_artifact(
             "feature_finite_count.npy": finite_count,
         }
         if codes:
-            arrays["security_ids.npy"] = np.asarray(codes, dtype="U9")
+            # CN codes are 9 chars (stays U9); US FIGIs are 12.
+            width = max(len(code) for code in codes)
+            arrays["security_ids.npy"] = np.asarray(codes, dtype="U{}".format(width))
         if coverage is not None:
             arrays["bar_coverage.npy"] = coverage
         array_contract = {}
         for filename, array in arrays.items():
-            digest = atomic_write_npy(temporary / filename, array)
+            if adopt_values_file and array is raw:
+                raw.flush()
+                os.replace(str(raw.filename), str(temporary / filename))
+                digest = sha256_path(temporary / filename)
+            else:
+                digest = atomic_write_npy(temporary / filename, array)
             array_contract[filename] = {
                 "sha256": digest,
                 "shape": list(array.shape),

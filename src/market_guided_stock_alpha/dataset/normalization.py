@@ -68,28 +68,43 @@ class FeatureStatistics:
         return output.astype("float32", copy=False)
 
 
+# float64 temporaries per column block (~0.5 GB); medians are per column, so
+# blocking is exact and peak memory no longer scales with 3x the [N,F] matrix.
+_FIT_BLOCK_ELEMENTS = 64 * 1024 * 1024
+
+
 def fit_robust_statistics(
     values: np.ndarray,
     feature_names: Sequence[str],
     epsilon: float = 1e-12,
     mad_multiplier: float = 1.4826,
 ) -> FeatureStatistics:
-    raw = np.asarray(values, dtype="float64")
+    raw = np.asarray(values)
     names = tuple(feature_names)
     if raw.ndim != 2 or raw.shape[1] != len(names) or not names:
         raise ValueError("robust fit requires [N,F] values and matching names")
-    clean = raw.copy()
-    finite = np.isfinite(clean)
-    clean[~finite] = np.nan
-    with np.errstate(invalid="ignore"):
-        median = np.nanmedian(clean, axis=0).astype("float64")
-        mad = np.nanmedian(np.abs(clean - median), axis=0).astype("float64")
+    median = np.empty(raw.shape[1], dtype="float64")
+    mad = np.empty(raw.shape[1], dtype="float64")
+    finite_count = np.empty(raw.shape[1], dtype="int64")
+    step = max(1, _FIT_BLOCK_ELEMENTS // max(1, raw.shape[0]))
+    for start in range(0, raw.shape[1], step):
+        columns = slice(start, start + step)
+        clean = raw[:, columns].astype("float64")
+        finite = np.isfinite(clean)
+        clean[~finite] = np.nan
+        finite_count[columns] = finite.sum(axis=0)
+        del finite
+        with np.errstate(invalid="ignore"):
+            median[columns] = np.nanmedian(clean, axis=0)
+            np.subtract(clean, median[columns], out=clean)
+            np.abs(clean, out=clean)
+            mad[columns] = np.nanmedian(clean, axis=0)
     statistics = FeatureStatistics(
         feature_names=names,
         median=median,
         mad=mad,
         scale=((mad + epsilon) * mad_multiplier).astype("float64"),
-        finite_count=finite.sum(axis=0).astype("int64"),
+        finite_count=finite_count,
         zero_mad_mask=(mad == 0.0).astype("bool"),
         epsilon=float(epsilon),
         mad_multiplier=float(mad_multiplier),
@@ -176,7 +191,17 @@ def _cross_section_fit_values(
             parts.append(values[:, 0, :][usable])
     if not parts:
         raise ValueError("{} has no observed training rows".format(artifact.family))
-    return np.concatenate(parts, axis=0)
+    # Fill a preallocated matrix (artifact dtype) and free each part as it is
+    # copied, instead of np.concatenate holding parts + result at once.
+    total = sum(len(part) for part in parts)
+    output = np.empty((total, parts[0].shape[1]), dtype=parts[0].dtype)
+    position = 0
+    parts.reverse()
+    while parts:
+        part = parts.pop()
+        output[position : position + len(part)] = part
+        position += len(part)
+    return output
 
 
 def _market_fit_values(

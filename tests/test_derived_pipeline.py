@@ -107,6 +107,63 @@ class DerivedPipelineTest(unittest.TestCase):
             self.assertFalse(np.isinf(artifact.values).any())
             self.assertEqual(artifact.manifest["provenance"]["test"], "synthetic")
 
+    def test_alpha158_batching_dtype_and_security_filter(self):
+        rng = np.random.default_rng(7)
+        frames = []
+        for position, code in enumerate(("000001.SZ", "600000.SH", "300750.SZ", "830799.BJ")):
+            frame = daily_stock(70)
+            frame["sec_code"] = code
+            frame.loc[:, ["open", "high", "low", "close", "vwap"]] *= 1.0 + 0.1 * position
+            frame["close"] += rng.normal(0.0, 0.05, len(frame))
+            # Gaps and a late listing exercise the NaN fill and source_observed.
+            drop = slice(20, 30) if position == 2 else slice(0, 40 if position == 3 else 0)
+            frames.append(frame.drop(frame.index[drop]))
+        source = pd.concat(frames, ignore_index=True)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            build_alpha158_artifact(source, root / "one", batch_securities=10)
+            # Parallel workers writing disjoint columns of the shared memmap.
+            build_alpha158_artifact(
+                source, root / "batched", batch_securities=1, workers=2
+            )
+            build_alpha158_artifact(
+                source, root / "small", dtype="float32",
+                security_codes=["600000.SH", "830799.BJ"],
+            )
+            one = read_alpha158_artifact(root / "one", mmap_mode=None)
+            batched = read_alpha158_artifact(root / "batched", mmap_mode=None)
+            small = read_alpha158_artifact(root / "small", mmap_mode=None)
+            # Batching and parallelism are exact, including missing rows (NaN)
+            # and observation flags.
+            self.assertEqual(
+                one.manifest["arrays"]["alpha158_raw.npy"]["sha256"],
+                batched.manifest["arrays"]["alpha158_raw.npy"]["sha256"],
+            )
+            np.testing.assert_array_equal(one.source_observed, batched.source_observed)
+            # Codes are sorted: 000001.SZ, 300750.SZ, 600000.SH, 830799.BJ.
+            self.assertFalse(one.source_observed[:40, 3].any())
+            self.assertTrue(np.isnan(one.values[20:30, 1]).all())
+            self.assertFalse(one.source_observed[20:30, 1].any())
+            # float32 + filter keeps the selected securities' full history.
+            self.assertEqual(small.values.dtype, np.float32)
+            self.assertEqual(small.security_codes, ("600000.SH", "830799.BJ"))
+            np.testing.assert_array_equal(
+                small.values, one.values[:, [2, 3]].astype("float32")
+            )
+            self.assertEqual(
+                small.manifest["provenance"]["alpha158_storage"],
+                {
+                    "security_filter": {
+                        "requested_count": 2,
+                        "input_security_count": 4,
+                        "kept_security_count": 2,
+                    },
+                    "dtype": "float32",
+                },
+            )
+            self.assertNotIn("alpha158_storage", one.manifest["provenance"])
+            self.assertEqual(sorted(path.name for path in root.iterdir()), ["batched", "one", "small"])
+
     def test_market63_and_market84_round_trips(self):
         cases = (
             (

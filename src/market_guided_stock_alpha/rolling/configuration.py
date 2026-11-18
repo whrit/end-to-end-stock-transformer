@@ -3,8 +3,10 @@
 from dataclasses import replace
 import json
 from pathlib import Path
+import tempfile
 from typing import Any, Dict, Mapping, Tuple
 
+from market_guided_stock_alpha import storage
 from market_guided_stock_alpha.data.calendar import TradingCalendar
 from market_guided_stock_alpha.data.io import read_table
 from market_guided_stock_alpha.dataset.layout import FeatureLayout
@@ -14,6 +16,8 @@ from market_guided_stock_alpha.derived.readers import (
     read_intraday_price_volume_artifact,
     read_market63_artifact,
     read_market84_artifact,
+    read_us_market63_artifact,
+    read_us_market84_artifact,
 )
 from market_guided_stock_alpha.labels.derived_label import DerivedLabelReader
 from market_guided_stock_alpha.labels.relative_excess_return import DEFAULT_VALUE_COLUMN
@@ -42,9 +46,33 @@ from market_guided_stock_alpha.training.config import (
 from market_guided_stock_alpha.training.losses import LossConfig
 
 
-def _path(base: Path, value: Any) -> Path:
-    path = Path(str(value))
-    return path if path.is_absolute() else base / path
+_MARKET_PROFILES = {
+    "dynamic_all_a_shares": (
+        "CSI500",
+        {
+            "name": "csi500_relative_excess_return_t1_t6",
+            "benchmark": "000905.SH",
+            "holding_period_trading_days": 5,
+            "dependency_offset_trading_days": 6,
+        },
+        (
+            "stage1_market63",
+            "stage2_market63",
+            "stage2_market84",
+            "dual_frequency_exploratory",
+        ),
+    ),
+    "dynamic_us_common_stocks": (
+        "SPY",
+        {
+            "name": "spy_relative_excess_return_t1_t6",
+            "benchmark": "SPY.US",
+            "holding_period_trading_days": 5,
+            "dependency_offset_trading_days": 6,
+        },
+        ("us_stage1_market63", "us_stage1_market84"),
+    ),
+}
 
 
 def _layout(name: str) -> FeatureLayout:
@@ -56,7 +84,22 @@ def _layout(name: str) -> FeatureLayout:
         return FeatureLayout.stage2("market84")
     if name == "dual_frequency_exploratory":
         return FeatureLayout.dual_frequency()
+    if name == "us_stage1_market63":
+        return FeatureLayout.stage1("us_market63")
+    if name == "us_stage1_market84":
+        return FeatureLayout.stage1("us_market84")
     raise ValueError("unknown feature layout")
+
+
+def _read_market(family: str, path: Path) -> Any:
+    # Built per call so module-level reader names stay patchable.
+    readers = {
+        "market63": read_market63_artifact,
+        "market84": read_market84_artifact,
+        "us_market63": read_us_market63_artifact,
+        "us_market84": read_us_market84_artifact,
+    }
+    return readers[family](path)
 
 
 def _training_factory(document: Mapping[str, Any]):
@@ -131,17 +174,26 @@ def validate_experiment_config(document: Mapping[str, Any]) -> Dict[str, Any]:
         raise ValueError("unsupported experiment config schema")
     if config["research_position"] not in ("stage1", "stage2", "secondary", "exploratory"):
         raise ValueError("invalid research_position")
-    if config["universe"] != "dynamic_all_a_shares":
-        raise ValueError("universe must be dynamic_all_a_shares")
-    expected_label = {
-        "name": "csi500_relative_excess_return_t1_t6",
-        "benchmark": "000905.SH",
-        "holding_period_trading_days": 5,
-        "dependency_offset_trading_days": 6,
-    }
+    profile = _MARKET_PROFILES.get(config["universe"])
+    if profile is None:
+        raise ValueError(
+            "universe must be one of {}".format(",".join(sorted(_MARKET_PROFILES)))
+        )
+    benchmark_name, expected_label, layout_names = profile
     if config["label_contract"] != expected_label:
-        raise ValueError("label contract must be the canonical CSI500-relative target")
-    layout = _layout(str(config["feature_layout"]))
+        raise ValueError(
+            "label contract must be the canonical {}-relative target".format(
+                benchmark_name
+            )
+        )
+    layout_name = str(config["feature_layout"])
+    layout = _layout(layout_name)
+    if layout_name not in layout_names:
+        raise ValueError(
+            "feature_layout {} does not match universe {}".format(
+                layout_name, config["universe"]
+            )
+        )
     rolling = dict(config["rolling"])
     if rolling.get("frequency") not in ("semiannual", "quarterly", "monthly"):
         raise ValueError("invalid rolling frequency")
@@ -194,31 +246,43 @@ def run_from_json_config(
 ) -> Dict[str, Any]:
     source = Path(config_path)
     document, validated = load_experiment_config(source)
-    base = source.parent
+    with tempfile.TemporaryDirectory() as directory:
+        return _run_document(
+            document, validated, source.parent, Path(directory), resume_override, device
+        )
+
+
+def _run_document(
+    document: Mapping[str, Any],
+    validated: Mapping[str, Any],
+    base: Path,
+    cache: Path,
+    resume_override: bool,
+    device: Any,
+) -> Dict[str, Any]:
+    def resolve(value: Any) -> Path:
+        return storage.materialize(value, base, cache)
+
     layout = validated["layout"]
     data_config = dict(document["data"])
-    calendar = TradingCalendar(read_table(_path(base, data_config["calendar"])))
-    membership = read_table(_path(base, data_config["membership"]))
-    label_path = _path(base, data_config["label"])
+    calendar = TradingCalendar(read_table(resolve(data_config["calendar"])))
+    membership = read_table(resolve(data_config["membership"]))
+    label_path = resolve(data_config["label"])
     manifest_value = data_config.get("label_manifest")
     label_reader = DerivedLabelReader(
         label_path,
         str(data_config.get("label_column", DEFAULT_VALUE_COLUMN)),
-        None if manifest_value is None else _path(base, manifest_value),
+        None if manifest_value is None else resolve(manifest_value),
     )
-    alpha158 = read_alpha158_artifact(_path(base, data_config["alpha158"]))
-    market = (
-        read_market63_artifact(_path(base, data_config["market"]))
-        if layout.market_family == "market63"
-        else read_market84_artifact(_path(base, data_config["market"]))
-    )
+    alpha158 = read_alpha158_artifact(resolve(data_config["alpha158"]))
+    market = _read_market(layout.market_family, resolve(data_config["market"]))
     intraday = (
-        read_intraday_price_volume_artifact(_path(base, data_config["intraday_price_volume"]))
+        read_intraday_price_volume_artifact(resolve(data_config["intraday_price_volume"]))
         if "intraday_price_volume" in layout.stock_families
         else None
     )
     intraday_market = (
-        read_intraday_market_artifact(_path(base, data_config["intraday_market"]))
+        read_intraday_market_artifact(resolve(data_config["intraday_market"]))
         if layout.intraday_market_family
         else None
     )
@@ -238,7 +302,6 @@ def run_from_json_config(
         resume=bool(resume_override or document.get("resume", False)),
         minimum_security_count=int(document.get("minimum_security_count", 2)),
     )
-    output_root = _path(base, document.get("output_root", "runs"))
     bundle = RollingDataBundle(
             calendar=calendar,
             membership=membership,
@@ -248,16 +311,40 @@ def run_from_json_config(
             intraday_price_volume=intraday,
             intraday_market=intraday_market,
         )
-    runner = RollingRunner(output_root, device)
-    if document["model"]["family"] == "lightgbm":
-        return runner.run_lightgbm(
-            run_config, targets, bundle, layout, validated["training"]
+
+    def execute(output_root: Path) -> Dict[str, Any]:
+        runner = RollingRunner(output_root, device)
+        if document["model"]["family"] == "lightgbm":
+            return runner.run_lightgbm(
+                run_config, targets, bundle, layout, validated["training"]
+            )
+        return runner.run(
+            run_config,
+            targets,
+            bundle,
+            layout,
+            _model_factory(document["model"]),
+            _training_factory(document["training"]),
         )
-    return runner.run(
-        run_config,
-        targets,
-        bundle,
-        layout,
-        _model_factory(document["model"]),
-        _training_factory(document["training"]),
-    )
+
+    output_value = document.get("output_root", "runs")
+    if not storage.is_remote(output_value):
+        return execute(resolve(output_value))
+    remote_root = str(output_value).rstrip("/")
+    local_root = cache / "output"
+    if run_config.resume:
+        try:
+            local_root = resolve(
+                "{}/{}".format(remote_root, run_config.experiment_name)
+            ).parent
+        except FileNotFoundError:
+            pass
+    try:
+        result = dict(execute(local_root))
+        # The local cache is deleted on return; report where the run lives.
+        result["run_directory"] = "{}/{}".format(remote_root, run_config.experiment_name)
+        return result
+    finally:
+        # Publish partial targets too, so a failed run can --resume remotely.
+        if local_root.is_dir():
+            storage.publish(local_root, remote_root, overwrite=True)

@@ -16,6 +16,10 @@ from market_guided_stock_alpha.features.market84 import (
     MARKET84_INDEX_CODES,
     MARKET84_UNIVERSES,
 )
+from market_guided_stock_alpha.features.us_market import (
+    US_MARKET_FAMILIES,
+    validate_us_market_spec,
+)
 
 
 def alpha158_spec() -> Dict[str, Any]:
@@ -69,6 +73,32 @@ def market84_spec() -> Dict[str, Any]:
         "feature_count_per_index": 21,
         "total_feature_count": 84,
     }
+
+
+def _us_market_spec(name: str) -> Dict[str, Any]:
+    universes, codes = US_MARKET_FAMILIES[name]
+    spec = {
+        "name": name,
+        "version": 1,
+        "universes": list(universes),
+        "index_codes": list(codes),
+        "windows": [5, 10, 20, 30, 60],
+        "rolling_min_periods": 1,
+        "rolling_std_ddof": 1,
+        "epsilon": 1e-12,
+        "feature_count_per_index": 21,
+        "total_feature_count": 21 * len(universes),
+    }
+    validate_us_market_spec(spec)
+    return spec
+
+
+def us_market63_spec() -> Dict[str, Any]:
+    return _us_market_spec("us_market63")
+
+
+def us_market84_spec() -> Dict[str, Any]:
+    return _us_market_spec("us_market84")
 
 
 def intraday_price_volume_spec() -> Dict[str, Any]:

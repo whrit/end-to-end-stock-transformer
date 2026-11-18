@@ -10,6 +10,8 @@ from market_guided_stock_alpha.derived.specs import (
     intraday_price_volume_spec,
     market63_spec,
     market84_spec,
+    us_market63_spec,
+    us_market84_spec,
 )
 from market_guided_stock_alpha.features.alpha158 import Alpha158Generator
 from market_guided_stock_alpha.features.intraday import IntradayPriceVolumeGenerator
@@ -18,6 +20,10 @@ from market_guided_stock_alpha.features.intraday_market import (
 )
 from market_guided_stock_alpha.features.market63 import Market63Generator
 from market_guided_stock_alpha.features.market84 import Market84Generator
+from market_guided_stock_alpha.features.us_market import USMarketGenerator
+
+
+MARKET_FAMILIES = ("market63", "market84", "us_market63", "us_market84")
 
 
 LOOKBACK_TRADING_DAYS = 8
@@ -34,6 +40,10 @@ def feature_names(family: str) -> Tuple[str, ...]:
         return tuple(Market63Generator(market63_spec()).get_feature_names())
     if family == "market84":
         return tuple(Market84Generator(market84_spec()).get_feature_names())
+    if family == "us_market63":
+        return tuple(USMarketGenerator(us_market63_spec()).get_feature_names())
+    if family == "us_market84":
+        return tuple(USMarketGenerator(us_market84_spec()).get_feature_names())
     if family == "intraday_market":
         return tuple(
             IntradayMarketGenerator(
@@ -59,8 +69,10 @@ class FeatureLayout:
             ("alpha158", "intraday_price_volume"),
         ):
             raise ValueError("unsupported stock feature layout")
-        if self.market_family not in ("market63", "market84"):
-            raise ValueError("market family must be market63 or market84")
+        if self.market_family not in MARKET_FAMILIES:
+            raise ValueError(
+                "market family must be one of {}".format(",".join(MARKET_FAMILIES))
+            )
         if self.intraday_market_family not in ("", "intraday_market"):
             raise ValueError("unknown exploratory intraday market family")
         if self.intraday_market_family and self.position != "exploratory":
@@ -119,8 +131,8 @@ class FeatureLayout:
         return result
 
     @classmethod
-    def stage1(cls) -> "FeatureLayout":
-        return cls(("alpha158",), "market63", position="core_stage1")
+    def stage1(cls, market_family: str = "market63") -> "FeatureLayout":
+        return cls(("alpha158",), market_family, position="core_stage1")
 
     @classmethod
     def stage2(cls, market_family: str = "market63") -> "FeatureLayout":

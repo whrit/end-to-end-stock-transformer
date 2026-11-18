@@ -270,6 +270,37 @@ uv run pytest
 
 The repository does not ship raw market data. Prepare your own data according to the documented [data contracts](docs/data_contract.md); paths above are examples only.
 
+### US equities (Alpaca + Cloudflare R2)
+
+A US profile runs alongside the China pipeline. Data comes from Alpaca (all-exchange feed, history since 2016), stocks are identified by OpenFIGI share-class FIGI, and everything is stored in Cloudflare R2. Jobs use a temporary local cache that is deleted when they finish. See the [US data contract](docs/data_contract.md#us-equities-profile).
+
+Put the secrets in a git-ignored `.env` at the repo root and let uv load it with `--env-file .env`. To make that the default, run `export UV_ENV_FILE=.env` in your shell.
+
+```bash
+uv sync --extra us
+cat > .env <<'EOF'
+APCA_API_KEY_ID=...
+APCA_API_SECRET_KEY=...
+# APCA_PAPER=false     # only if these are live-account keys
+OPENFIGI_API_KEY=...
+R2_ACCOUNT_ID=...
+R2_ACCESS_KEY_ID=...
+R2_SECRET_ACCESS_KEY=...
+EOF
+R=r2://stock-transformer-data/us/v1
+
+uv run --env-file .env scripts/fetch_us_daily.py --output $R/raw     # smoke run: --symbols AAPL,MSFT,NVDA --output r2://.../us/smoke/raw
+uv run --env-file .env scripts/build_relative_excess_label.py --stock-daily $R/raw/daily_stock.parquet \
+  --benchmark-daily $R/raw/daily_index_us_market63.parquet --calendar $R/raw/calendar.parquet \
+  --benchmark-code SPY.US --output $R/derived/relative_excess_return_5d.pkl
+uv run --env-file .env scripts/build_daily_features.py alpha158 --input $R/raw/daily_stock.parquet \
+  --dtype float32 --membership $R/raw/membership.parquet --output $R/derived/alpha158
+uv run --env-file .env scripts/build_daily_features.py us_market63 --input $R/raw/daily_index_us_market63.parquet --output $R/derived/us_market63
+uv run --env-file .env scripts/run_rolling.py configs/us/stage1/master_d512_us_market63.json --resume
+```
+
+R2 outputs are immutable: a script refuses to overwrite an existing location, so write each new data version to a new prefix (e.g. `us/v2`). The shipped US configs use the bucket `stock-transformer-data`; edit the `r2://` paths if your bucket has another name. The US profile currently covers Stage 1 (daily features). The 390-bar intraday features are Phase 2.
+
 ### Custom Experiment Configuration
 
 To run a custom experiment, copy the closest JSON config under `configs/`, update `experiment_name` and the data paths, and then modify the project-specific settings as needed.

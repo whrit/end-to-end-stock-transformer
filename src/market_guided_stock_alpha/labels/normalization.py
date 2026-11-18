@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from market_guided_stock_alpha.data.contracts import US_SECURITY_CODE
 
 LABEL_KEY_COLUMNS = ("trade_date", "sec_code")
 _CANONICAL_CODE = re.compile(r"^(\d{6})\.(SH|SZ|BJ)$", re.IGNORECASE)
@@ -26,6 +27,8 @@ def normalize_security_code(value: Any) -> str:
     direct = _CANONICAL_CODE.fullmatch(text)
     if direct:
         return "{}.{}".format(direct.group(1), direct.group(2).upper())
+    if US_SECURITY_CODE.fullmatch(text):
+        return text
     prefixed = _PREFIXED_CODE.fullmatch(text)
     if prefixed:
         return "{}.{}".format(prefixed.group(2), prefixed.group(1).upper())

@@ -423,5 +423,32 @@ class DatasetCanonicalTest(unittest.TestCase):
         self.assertGreater(len(result.purged_valid_dates), 0)
 
 
+class RobustFitBlockingTest(unittest.TestCase):
+    def test_column_blocking_is_exact_for_float64_and_float32(self):
+        import warnings
+        from unittest import mock
+
+        import market_guided_stock_alpha.dataset.normalization as normalization
+
+        rng = np.random.default_rng(3)
+        values = rng.standard_t(3, size=(503, 11))
+        values[rng.random(values.shape) < 0.05] = np.nan
+        values[rng.random(values.shape) < 0.01] = np.inf
+        values[:, 4] = 2.0  # zero MAD
+        names = ["f{}".format(index) for index in range(11)]
+        for data in (values, values.astype("float32")):
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", RuntimeWarning)
+                whole = normalization.fit_robust_statistics(data, names)
+                with mock.patch.object(normalization, "_FIT_BLOCK_ELEMENTS", 503 * 3):
+                    blocked = normalization.fit_robust_statistics(data, names)
+            for field in ("median", "mad", "scale", "finite_count", "zero_mad_mask"):
+                with self.subTest(dtype=str(data.dtype), field=field):
+                    np.testing.assert_array_equal(
+                        getattr(whole, field), getattr(blocked, field)
+                    )
+            self.assertTrue(blocked.zero_mad_mask[4])
+
+
 if __name__ == "__main__":
     unittest.main()

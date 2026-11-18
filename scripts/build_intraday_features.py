@@ -3,7 +3,8 @@
 
 import argparse
 import json
-from pathlib import Path
+import tempfile
+from pathlib import Path, PurePosixPath
 from typing import Any, Dict, Optional, Sequence
 
 
@@ -18,6 +19,12 @@ from market_guided_stock_alpha.derived.builders import (
     build_intraday_market_artifact,
     build_intraday_price_volume_artifact,
 )
+from market_guided_stock_alpha.storage import (
+    is_remote,
+    materialize,
+    parse_r2_uri,
+    publish,
+)
 
 
 BUILDERS = {
@@ -29,11 +36,17 @@ BUILDERS = {
 }
 
 
-def _input_provenance(paths: Dict[str, Path]) -> Dict[str, Any]:
+def _input_provenance(
+    locations: Dict[str, str], paths: Dict[str, Path]
+) -> Dict[str, Any]:
     return {
         "inputs": {
             name: {
-                "path": str(path),
+                "path": (
+                    locations[name]
+                    if is_remote(locations[name])
+                    else str(Path(locations[name]))
+                ),
                 "sha256": sha256_path(path),
                 "size_bytes": int(path.stat().st_size),
             }
@@ -41,6 +54,12 @@ def _input_provenance(paths: Dict[str, Path]) -> Dict[str, Any]:
         },
         "builder": Path(__file__).name,
     }
+
+
+def _local_output(location: str, cache: Path) -> Path:
+    if not is_remote(location):
+        return Path(location)
+    return cache / "output" / PurePosixPath(parse_r2_uri(location)[1]).name
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -52,22 +71,28 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("family", choices=tuple(BUILDERS))
     parser.add_argument(
-        "--input", type=Path,
-        help="Canonical long CSV, Parquet, or pandas pickle table.",
+        "--input",
+        help="Canonical long CSV, Parquet, or pandas pickle table (path or r2:// URI).",
     )
     for field in MINUTE_FIELDS:
         parser.add_argument(
-            "--wide-{}".format(field), type=Path,
-            help="Wide timestamp-by-instrument pandas pickle for {}.".format(field),
+            "--wide-{}".format(field),
+            help=(
+                "Wide timestamp-by-instrument pandas pickle for {} "
+                "(path or r2:// URI).".format(field)
+            ),
         )
     parser.add_argument(
-        "--output", required=True, type=Path,
-        help="New immutable artifact directory; it must not already exist.",
+        "--output", required=True,
+        help=(
+            "New immutable artifact directory (path or r2:// URI); "
+            "it must not already exist."
+        ),
     )
     return parser
 
 
-def _load_input(args: argparse.Namespace, code_column: str):
+def _input_locations(args: argparse.Namespace) -> Dict[str, str]:
     wide_paths = {
         field: getattr(args, "wide_{}".format(field)) for field in MINUTE_FIELDS
     }
@@ -75,20 +100,37 @@ def _load_input(args: argparse.Namespace, code_column: str):
     if args.input is not None and supplied_wide:
         raise ValueError("use either --input or the six --wide-* files, not both")
     if args.input is not None:
-        return read_table(args.input), {"long": args.input}
+        return {"long": args.input}
     if len(supplied_wide) != len(MINUTE_FIELDS):
         raise ValueError("provide --input or all six --wide-* pickle files")
-    frames = read_wide_minute_pickles(supplied_wide)
-    return wide_minute_frames_to_long(frames, code_column), supplied_wide
+    return supplied_wide
+
+
+def _load_input(
+    locations: Dict[str, str], cache: Path, code_column: str
+):
+    paths = {
+        name: materialize(location, Path.cwd(), cache)
+        for name, location in locations.items()
+    }
+    if "long" in paths:
+        return read_table(paths["long"]), paths
+    frames = read_wide_minute_pickles(paths)
+    return wide_minute_frames_to_long(frames, code_column), paths
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = build_parser().parse_args(argv)
     builder, code_column = BUILDERS[args.family]
-    source, input_paths = _load_input(args, code_column)
-    manifest = builder(
-        source, args.output, provenance=_input_provenance(input_paths)
-    )
+    locations = _input_locations(args)
+    with tempfile.TemporaryDirectory(prefix="build_intraday_features_") as directory:
+        cache = Path(directory)
+        source, input_paths = _load_input(locations, cache, code_column)
+        output = _local_output(args.output, cache)
+        manifest = builder(
+            source, output, provenance=_input_provenance(locations, input_paths)
+        )
+        publish(output, args.output)
     print(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True))
     return 0
 

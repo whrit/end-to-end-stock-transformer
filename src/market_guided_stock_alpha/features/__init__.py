@@ -19,6 +19,7 @@ from market_guided_stock_alpha.features.intraday_market import (
 )
 from market_guided_stock_alpha.features.market63 import Market63Generator
 from market_guided_stock_alpha.features.market84 import Market84Generator
+from market_guided_stock_alpha.features.us_market import USMarketGenerator
 
 __all__ = [
     "KLINE_FEATURES",
@@ -33,5 +34,6 @@ __all__ = [
     "IntradayPriceVolumeGenerator",
     "Market63Generator",
     "Market84Generator",
+    "USMarketGenerator",
     "validate_alpha158_spec",
 ]
