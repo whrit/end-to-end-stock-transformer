@@ -369,8 +369,13 @@ R2_VARIABLES = ("R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY")
 MAX_PRICE_PER_HOUR = 0.50
 MIN_NETWORK_MBPS = 750.0  # both upload and download
 REGIONS = ("US", "CA", "MX")  # North America, by vast.ai country code
-# Compatibility with the locked CUDA torch: CUDA 13 builds need Turing (sm_75)
-# or newer GPUs and a host driver that supports the locked CUDA major version.
+# Compatibility with the locked CUDA torch, two independent checks:
+# - host driver: cuda_max_good (the vastai CLI's `cuda_vers` alias, the max CUDA
+#   version the driver supports) >= the locked CUDA major. Send cuda_max_good:
+#   the REST API does not apply `cuda_vers` (it returned CUDA 12.x hosts).
+# - GPU architecture: CUDA 13 torch has no kernels below Turing (sm_75), and
+#   CUDA 13 drivers still run on GTX 10xx / TITAN X, so the driver check alone
+#   would admit GPUs the job cannot use.
 MIN_COMPUTE_CAPABILITY = 750  # vast.ai encodes sm_75 as 750
 
 
@@ -459,7 +464,7 @@ def search_offers(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
         "inet_down": {"gte": min_network},
         "geolocation": {"in": list(REGIONS)},
         "compute_cap": {"gte": MIN_COMPUTE_CAPABILITY},
-        "cuda_max_good": {"gte": MIN_HOST_CUDA},
+        "cuda_max_good": {"gte": MIN_HOST_CUDA},  # = CLI `cuda_vers`
         "order": [["dph_total", "asc"]],
         "limit": 5000,  # a few hundred offers pass these limits; fetch them all
         "type": "on-demand",
@@ -536,7 +541,7 @@ def _ask_filters(filters: Dict[str, Any]) -> Dict[str, Any]:
             style="dim",
         )
     )
-    ask("GPU name contains (e.g. 3090, 4090, A4000; 'any')", "gpu", str)
+    ask("GPU name contains (e.g. 3090, 4090, A100, H100; 'any')", "gpu", str)
     ask("min GPUs", "gpus", int)
     ask("min VRAM per GPU, GB", "gpu_ram", float)
     ask("max $/hour (≤ {:.2f})".format(MAX_PRICE_PER_HOUR), "max_price", float)
@@ -695,7 +700,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("setup", help="upload the agent and print the instance start command").set_defaults(run=cmd_setup)
     rent = sub.add_parser("rent", help="pick and rent a vast.ai offer with the agent preinstalled")
-    rent.add_argument("--gpu", default=None, help="GPU name contains, e.g. 3090, 4090, A4000")
+    rent.add_argument("--gpu", default=None, help="GPU name contains, e.g. 3090, 4090, A100, H100")
     rent.add_argument("--gpus", type=int, default=1, help="minimum GPU count")
     rent.add_argument("--min-vram", type=float, default=16.0, help="minimum VRAM per GPU, GB")
     rent.add_argument(
