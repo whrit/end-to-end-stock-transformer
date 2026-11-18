@@ -92,6 +92,10 @@ def _write_tables(
     atomic_write_json(directory / MANIFEST_NAME, manifest)
 
 
+def _stage(index: int, text: str) -> None:
+    note(("━━ {}/6 ".format(index), "bold magenta"), (text, "bold"))
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = build_parser().parse_args(argv)
     wanted = (
@@ -134,23 +138,23 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         secrets["APCA_API_KEY_ID"], secrets["APCA_API_SECRET_KEY"]
     )
 
-    note("[1/6] listing Alpaca assets")
+    _stage(1, "listing Alpaca assets")
     assets = list_assets(trading)
     if wanted is not None:
         missing = sorted(wanted.difference(assets["alpaca_symbol"]))
         if missing:
             raise SystemExit("error: unknown Alpaca symbols: {}".format(",".join(missing)))
         assets = assets.loc[assets["alpaca_symbol"].isin(wanted)].reset_index(drop=True)
-    note("[2/6] mapping {} tickers through OpenFIGI".format(assets["alpaca_symbol"].nunique()))
+    _stage(2, "mapping {:,} tickers through OpenFIGI".format(assets["alpaca_symbol"].nunique()))
     figi = map_tickers(sorted(set(assets["alpaca_symbol"])), secrets["OPENFIGI_API_KEY"])
     securities, counts = build_securities(assets, figi)
     symbols = sorted(set(securities["alpaca_symbol"]) | set(MARKET84_ETFS))
-    note("[3/6] fetching daily bars for {} symbols (adjusted, then raw)".format(len(symbols)))
+    _stage(3, "fetching daily bars for {:,} symbols (adjusted, then raw)".format(len(symbols)))
     adjusted = fetch_daily_bars(data, symbols, start, end, "all")
     raw = fetch_daily_bars(data, symbols, start, end, "raw")
-    note("[4/6] fetching trading calendar")
+    _stage(4, "fetching trading calendar")
     trading_days = fetch_trading_days(trading, start, end)
-    note("[5/6] building canonical tables")
+    _stage(5, "building canonical tables")
     tables = build_us_tables(
         securities, adjusted, raw, trading_days, start, end,
         min_price=args.min_price, min_dollar_volume=args.min_dollar_volume,
@@ -185,7 +189,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "generated_at_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
     }
 
-    note("[6/6] writing tables to {}".format(args.output))
+    _stage(6, "writing tables to {}".format(args.output))
     if remote:
         with tempfile.TemporaryDirectory() as workdir:
             staged = Path(workdir) / "raw"

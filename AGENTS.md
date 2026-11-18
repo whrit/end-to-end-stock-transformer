@@ -129,13 +129,13 @@ There is no linter or formatter configured. Match the surrounding style.
   - China output must stay byte-identical (Alpha158 `dtype` default `float64`; `--dtype float32 --membership` is for US).
 - **Security codes** (`data/contracts.py` `normalize_security_code`): China `NNNNNN.SH|SZ|BJ`, US stocks = share-class FIGI `BBG[0-9A-Z]{9}`, US ETFs `TICKER.US`. Artifact `security_ids.npy` dtype is sized to the longest code (China stays `U9`).
 - **Progress output.** Long loops use `market_guided_stock_alpha.progress`:
-  - Wrap loops with `progress(iterable_or_total=..., desc=..., unit=...)`, a tqdm wrapper.
-  - Use `note(...)` for stage messages from loops that can't be wrapped.
+  - Wrap loops with `progress(iterable, total=..., desc=..., unit=..., leave=...)`. It's a small tqdm-like surface (iterate, `update`, `set_postfix(_str)`, `close`, context manager) over one shared rich `Progress`. Nested bars stack indented under their parent, and `unit="B"` shows sizes and transfer speed.
+  - Use `note(...)` for stage messages from loops that can't be wrapped. Its parts are text, `(text, style)` pairs, or a single rich renderable (e.g. the per-seed results `Table`). Python warnings raised while bars are live are rerouted through `note` as one line.
   - Inner bars use `leave=False`. Count real work units (target, date, stock, symbol, bytes), not batches.
   - Both write to stderr only, because stdout carries the scripts' JSON manifests. Bars auto-disable off-TTY, so tests and pipes stay quiet.
   - Never let a bar change outputs or metrics.
   - Wired in: rolling runner (seed × target), trainer (epochs with loss/metric postfix, train/validate dates), prediction, fit statistics, LightGBM (row assembly, boosting rounds with valid rank IC/best), Alpha158 build (per stock; parallel futures advance it), intraday builders, R2 transfers (bytes), Alpaca/OpenFIGI fetch, and `fetch_us_daily.py` stages.
-  - Bars vanish when done, so training also prints persistent `note` lines: one per epoch (losses, metric, `*` on improvement, best, seconds), one per finished target (best epoch/round, test rank IC/IC/top10, `(resumed)`), and one per seed overall. These lines appear even off-TTY, so redirected logs keep the history.
+  - Bars vanish when done, so training also prints persistent `note` lines: one per epoch (losses, metric, `★ new best`, best, seconds), one per finished target (best epoch/round, sign-coloured test rank IC/IC/top10, `(resumed)`), and a results table per seed. These lines appear even off-TTY (without colour), so redirected logs keep the history.
 
 ## Important Files
 
@@ -159,7 +159,8 @@ There is no linter or formatter configured. Match the surrounding style.
 ## Runtime/Tooling Preferences
 
 - **uv** with `uv.lock`, and **Python 3.14** (`.python-version`, `requires-python = ">=3.14"`). Use `uv add` / `uv sync` rather than pip.
-- Core deps: `numpy`, `pandas`, `torch`, `tqdm` (progress bars; `TQDM_DISABLE=1` hides them, `TQDM_MININTERVAL=5` slows refresh). Optional extras: `lightgbm` (LightGBM baseline), `parquet` (pyarrow, for `.parquet` inputs), `us` (alpaca-py, boto3, pyarrow). Dev group: `pytest`.
+- Core deps: `numpy`, `pandas`, `torch`, `rich` (progress display; `PROGRESS_DISABLE=1` hides bars, `NO_COLOR=1` drops colour). Optional extras: `lightgbm` (LightGBM baseline), `parquet` (pyarrow, for `.parquet` inputs), `us` (alpaca-py, boto3, pyarrow). Dev group: `pytest`.
+- `uv add`/`uv remove` re-sync without extras, which uninstalls them. Run `uv sync --extra us` afterwards for US work.
 - On MPS, the PyTorch warning `index_put_with_accumulate_mps does not have a deterministic implementation` is expected: one backward op has no deterministic MPS kernel, so same-seed reruns can differ in the last decimals. Use `--device cpu` for bit-exact reruns.
 - Pickle inputs and outputs are pandas pickles. Load only trusted files.
 - Never commit `data/`, `runs/`, `outputs/`, `*.pt`/`*.ckpt`, or `/backtesting/`.

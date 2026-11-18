@@ -3,10 +3,12 @@
 from dataclasses import dataclass
 import json
 from pathlib import Path
-from typing import Any, Callable, Dict, Mapping, Optional, Sequence
+from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple
 
 import pandas as pd
 import torch
+from rich.table import Table
+from rich.text import Text
 
 from market_guided_stock_alpha.artifacts import atomic_write_json, sha256_mapping, sha256_path
 from market_guided_stock_alpha.data.calendar import TradingCalendar
@@ -92,45 +94,75 @@ class RollingRunConfig:
             object.__setattr__(self, "initialization", InitializationMode(str(self.initialization)))
 
 
-def _metric(value: Any) -> str:
-    return "n/a" if value is None else "{:.4f}".format(float(value))
+def _metric(value: Any) -> Tuple[str, str]:
+    """Formatted metric with a sign colour."""
+    if value is None:
+        return "n/a", "dim"
+    value = float(value)
+    return "{:+.4f}".format(value), "green" if value > 0 else "red" if value < 0 else "white"
 
 
-def _target_line(seed: int, target_id: str, summary: Mapping[str, Any], resumed: bool) -> str:
-    """One persistent log line per finished target (bars are transient)."""
+def _selection(summary: Mapping[str, Any]) -> str:
     training = summary.get("training") or {}
     if training.get("best_epoch") is not None:
-        selection = "best epoch {} ({} {})".format(
-            training["best_epoch"],
-            training.get("primary_metric", "valid"),
-            _metric(training.get("best_validation_metric")),
+        return "epoch {} · {:.4f}".format(
+            training["best_epoch"], float(training.get("best_validation_metric", float("nan")))
         )
-    elif training.get("best_iteration") is not None:
-        selection = "best round {} (valid rank IC {})".format(
-            training["best_iteration"],
-            _metric((training.get("best_validation_metrics") or {}).get("mean_rankic")),
+    if training.get("best_iteration") is not None:
+        rank_ic = (training.get("best_validation_metrics") or {}).get("mean_rankic")
+        return "round {} · {:.4f}".format(
+            training["best_iteration"], float("nan") if rank_ic is None else float(rank_ic)
         )
-    else:
-        selection = "no training record"
-    return "seed {} · target {}{}: {} · test rank IC {} · IC {} · top10 {}".format(
-        seed,
-        target_id,
-        " (resumed)" if resumed else "",
-        selection,
+    return "n/a"
+
+
+def _target_parts(
+    seed: int, target_id: str, summary: Mapping[str, Any], resumed: bool
+) -> Tuple[Any, ...]:
+    """One persistent log line per finished target (bars are transient)."""
+    return (
+        ("✓ ", "bold green"),
+        ("seed {} ".format(seed), "bold"),
+        ("target {}".format(target_id), "bold cyan"),
+        (" (resumed)" if resumed else "", "dim"),
+        ("  best ", "dim"),
+        _selection(summary),
+        ("  test rank IC ", "dim"),
         _metric(summary.get("rank_ic")),
+        ("  IC ", "dim"),
         _metric(summary.get("ic")),
+        ("  top10 ", "dim"),
         _metric(summary.get("top10")),
     )
 
 
-def _overall_line(seed: int, overall: Mapping[str, Any]) -> str:
-    return "seed {} overall ({} targets): rank IC {} · IC {} · top10 {}".format(
-        seed,
-        overall.get("target_count"),
-        _metric(overall.get("rank_ic")),
-        _metric(overall.get("ic")),
-        _metric(overall.get("top10")),
+def _seed_table(seed: int, summaries: Sequence[Mapping[str, Any]], overall: Mapping[str, Any]) -> Table:
+    table = Table(
+        title="seed {} · test results".format(seed),
+        title_style="bold magenta",
+        header_style="bold cyan",
+        border_style="bright_black",
     )
+    for name, justify in (
+        ("target", "left"),
+        ("best (valid)", "left"),
+        ("rank IC", "right"),
+        ("IC", "right"),
+        ("top5", "right"),
+        ("top10", "right"),
+    ):
+        table.add_column(name, justify=justify)
+
+    def cells(row: Mapping[str, Any]) -> Sequence[Text]:
+        return [Text(*_metric(row.get(name))) for name in ("rank_ic", "ic", "top5", "top10")]
+
+    for summary in summaries:
+        table.add_row(str(summary.get("target_id")), _selection(summary), *cells(summary))
+    table.add_section()
+    table.add_row(
+        Text("overall ({})".format(overall.get("target_count")), style="bold"), "", *cells(overall)
+    )
+    return table
 
 
 def _build_dataset(
@@ -312,12 +344,12 @@ class RollingRunner:
                 prediction_by_seed[int(seed)][target.target_id] = frame
                 target_summaries.append(summary)
                 run_bar.update(1)
-                note(_target_line(seed, target.target_id, summary, resumed))
+                note(*_target_parts(seed, target.target_id, summary, resumed))
 
             overall = aggregate_overall(target_summaries)
             overall.update({"seed": int(seed), "kind": "individual_seed_overall"})
             atomic_write_json(run_root / "seed_{}".format(seed) / "overall.json", overall)
-            note(_overall_line(seed, overall))
+            note(_seed_table(seed, target_summaries, overall))
             seed_results[int(seed)] = {"targets": target_summaries, "overall": overall}
 
         run_bar.close()
@@ -502,11 +534,11 @@ class RollingRunner:
                 prediction_by_seed[int(seed)][target.target_id] = frame
                 target_summaries.append(summary)
                 run_bar.update(1)
-                note(_target_line(seed, target.target_id, summary, resumed))
+                note(*_target_parts(seed, target.target_id, summary, resumed))
             overall = aggregate_overall(target_summaries)
             overall.update({"seed": int(seed), "kind": "individual_seed_overall"})
             atomic_write_json(run_root / "seed_{}".format(seed) / "overall.json", overall)
-            note(_overall_line(seed, overall))
+            note(_seed_table(seed, target_summaries, overall))
             seed_results[int(seed)] = {"targets": target_summaries, "overall": overall}
 
         run_bar.close()

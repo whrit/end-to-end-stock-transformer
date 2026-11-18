@@ -85,11 +85,7 @@ def _list_keys(client: Any, bucket: str, prefix: str) -> Dict[str, int]:
 
 def _byte_bar(action: str, uri: str, total: int) -> Any:
     return progress(
-        total=total,
-        desc="{} {}".format(action, uri.rstrip("/").rsplit("/", 1)[-1]),
-        unit="B",
-        unit_scale=True,
-        unit_divisor=1024,
+        total=total, desc="{} {}".format(action, uri.rstrip("/").rsplit("/", 1)[-1]), unit="B"
     )
 
 

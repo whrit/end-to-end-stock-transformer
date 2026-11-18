@@ -168,24 +168,21 @@ class Trainer:
             else:
                 without_improvement += 1
             epochs.set_postfix(
-                train_loss="{:.4f}".format(train["train_loss"]),
+                loss="{:.4f}".format(train["train_loss"]),
                 valid="{:.4f}".format(metric),
                 best="{:.4f}@{}".format(best_metric, best_epoch),
-                refresh=False,
             )
             note(
-                "  epoch {}/{} · train_loss {:.4f} · val_loss {:.4f} · {} {:.4f}{} · best {:.4f} @ {} · {:.0f}s".format(
-                    epoch,
-                    self.config.epochs,
-                    train["train_loss"],
-                    validation_loss,
-                    self.config.primary_metric,
-                    metric,
-                    " *" if improved else "",
-                    best_metric,
-                    best_epoch,
-                    time.monotonic() - started,
-                )
+                ("    epoch {:>3}/{:<3}".format(epoch, self.config.epochs), "bold"),
+                ("  train_loss ", "dim"),
+                "{:.4f}".format(train["train_loss"]),
+                ("  val_loss ", "dim"),
+                "{:.4f}".format(validation_loss),
+                ("  {} ".format(self.config.primary_metric), "dim"),
+                ("{:.4f}".format(metric), "bold green" if improved else "white"),
+                ("  ★ new best" if improved else "  best {:.4f} @ {}".format(best_metric, best_epoch),
+                 "green" if improved else "dim"),
+                ("  {:.0f}s".format(time.monotonic() - started), "cyan"),
             )
             if self.checkpoints is not None and (
                 epoch % self.config.checkpoint_every == 0 or improved
