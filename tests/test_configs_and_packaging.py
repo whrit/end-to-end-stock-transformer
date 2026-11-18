@@ -149,7 +149,7 @@ class ConfigAndPackagingTest(unittest.TestCase):
                     feature_version=(3, 8),
                 )
         pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
-        self.assertIn('requires-python = ">=3.8"', pyproject)
+        self.assertIn('requires-python = ">=3.14"', pyproject)
         self.assertIn('lightgbm = ["lightgbm"]', pyproject)
         self.assertIn('parquet = ["pyarrow"]', pyproject)
         for path in (ROOT / "scripts").glob("*.py"):

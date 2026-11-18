@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run
 """Build the canonical relative-excess label from transparent tabular files."""
 
 import argparse

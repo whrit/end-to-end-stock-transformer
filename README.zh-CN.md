@@ -240,31 +240,32 @@ docs/       数据、特征、实验、组合评估与复现文档
 
 ## 快速开始
 
-```bash
-pip install -e ".[parquet,test]"
-# 如需运行 LightGBM 实验：pip install -e ".[lightgbm]"
+所有命令都通过 [uv](https://docs.astral.sh/uv/) 执行：`uv sync` 安装锁定的环境（包括 `dev` 组中的 `pytest`），`uv run` 在该环境中运行，`uv add` 添加依赖（可选依赖用 `uv add --optional us <pkg>`，开发工具用 `uv add --dev <pkg>`）。脚本也可以直接执行（`./scripts/run_rolling.py ...`），其 shebang 为 `uv run`。
 
-python scripts/build_relative_excess_label.py \
+```bash
+uv sync --extra parquet              # 如需运行 LightGBM 实验，再加 --extra lightgbm
+
+uv run scripts/build_relative_excess_label.py \
   --stock-daily data/daily_stock.parquet \
   --benchmark-daily data/daily_index.parquet \
   --calendar data/calendar.csv \
   --output data/derived/relative_excess_return_5d.pkl
 
-python scripts/build_daily_features.py alpha158 \
+uv run scripts/build_daily_features.py alpha158 \
   --input data/daily_stock.parquet \
   --output data/derived/alpha158
 
-python scripts/build_daily_features.py market63 \
+uv run scripts/build_daily_features.py market63 \
   --input data/daily_index.parquet \
   --output data/derived/market63
 
-python scripts/build_intraday_features.py intraday_price_volume \
+uv run scripts/build_intraday_features.py intraday_price_volume \
   --input data/minute_stock.parquet \
   --output data/derived/intraday_price_volume
 
 # 按 docs/data_contract.md 的 membership schema 准备 data/membership.parquet。
-python scripts/run_rolling.py configs/stage2/intraday_price_volume_master_d512_market63.json
-pytest
+uv run scripts/run_rolling.py configs/stage2/intraday_price_volume_master_d512_market63.json
+uv run pytest
 ```
 
 仓库不包含原始市场数据。请按照[公开数据契约](docs/data_contract.md)准备自己的数据；以上路径仅为示例。
@@ -287,7 +288,7 @@ pytest
 修改配置后运行：
 
 ```bash
-python scripts/run_rolling.py path/to/config.json --device cuda
+uv run scripts/run_rolling.py path/to/config.json --device cuda   # 也可用 mps（Apple Silicon）或 cpu；省略则按 cuda > mps > cpu 自动选择
 ```
 
 如果希望跳过已经完成且兼容性校验通过的 rolling targets，可以加上 `--resume`。

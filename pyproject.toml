@@ -14,7 +14,7 @@ classifiers = [
   "Intended Audience :: Science/Research",
   "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.8",
+  "Programming Language :: Python :: 3.14",
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
@@ -26,7 +26,10 @@ dependencies = [
 [project.optional-dependencies]
 lightgbm = ["lightgbm"]
 parquet = ["pyarrow"]
-test = ["pytest"]
+us = ["alpaca-py", "boto3", "pyarrow"]
+
+[dependency-groups]
+dev = ["pytest"]
 
 [tool.setuptools]
 package-dir = {"" = "src"}

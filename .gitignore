@@ -37,3 +37,5 @@ runs/
 *.tar.gz
 *.zip
 /backtesting/
+
+.env

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run
 """Run one canonical rolling experiment from a transparent JSON config."""
 
 import argparse

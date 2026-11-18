@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run
 """Build canonical intraday feature artifacts from long or wide minute data."""
 
 import argparse

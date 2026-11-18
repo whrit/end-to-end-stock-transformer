@@ -240,31 +240,32 @@ docs/       data, feature, experiment, portfolio, and reproducibility documentat
 
 ## Quick Start
 
-```bash
-pip install -e ".[parquet,test]"
-# Optional for LightGBM experiments: pip install -e ".[lightgbm]"
+All commands go through [uv](https://docs.astral.sh/uv/): `uv sync` installs the locked environment (including `pytest` from the `dev` group), `uv run` executes inside it, and `uv add` adds dependencies (`uv add --optional us <pkg>` for an extra, `uv add --dev <pkg>` for tooling). The scripts are also directly executable (`./scripts/run_rolling.py ...`) through a `uv run` shebang.
 
-python scripts/build_relative_excess_label.py \
+```bash
+uv sync --extra parquet              # add --extra lightgbm for LightGBM experiments
+
+uv run scripts/build_relative_excess_label.py \
   --stock-daily data/daily_stock.parquet \
   --benchmark-daily data/daily_index.parquet \
   --calendar data/calendar.csv \
   --output data/derived/relative_excess_return_5d.pkl
 
-python scripts/build_daily_features.py alpha158 \
+uv run scripts/build_daily_features.py alpha158 \
   --input data/daily_stock.parquet \
   --output data/derived/alpha158
 
-python scripts/build_daily_features.py market63 \
+uv run scripts/build_daily_features.py market63 \
   --input data/daily_index.parquet \
   --output data/derived/market63
 
-python scripts/build_intraday_features.py intraday_price_volume \
+uv run scripts/build_intraday_features.py intraday_price_volume \
   --input data/minute_stock.parquet \
   --output data/derived/intraday_price_volume
 
 # Prepare data/membership.parquet using the membership schema in docs/data_contract.md.
-python scripts/run_rolling.py configs/stage2/intraday_price_volume_master_d512_market63.json
-pytest
+uv run scripts/run_rolling.py configs/stage2/intraday_price_volume_master_d512_market63.json
+uv run pytest
 ```
 
 The repository does not ship raw market data. Prepare your own data according to the documented [data contracts](docs/data_contract.md); paths above are examples only.
@@ -287,7 +288,7 @@ Standard training hyperparameters are specified directly in the JSON configs and
 After editing the config:
 
 ```bash
-python scripts/run_rolling.py path/to/config.json --device cuda
+uv run scripts/run_rolling.py path/to/config.json --device cuda   # or mps (Apple Silicon) / cpu; omit to auto-select cuda > mps > cpu
 ```
 
 Use `--resume` to skip compatible targets that have already been completed.

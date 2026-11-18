@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run
 """Build canonical daily feature artifacts from one transparent table."""
 
 import argparse
