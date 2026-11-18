@@ -134,7 +134,8 @@ There is no linter or formatter configured. Match the surrounding style.
   - Inner bars use `leave=False`. Count real work units (target, date, stock, symbol, bytes), not batches.
   - Both write to stderr only, because stdout carries the scripts' JSON manifests. Bars auto-disable off-TTY, so tests and pipes stay quiet.
   - Never let a bar change outputs or metrics.
-  - Wired in: rolling runner (seed × target), trainer (epochs with loss/metric postfix, train/validate dates), prediction, fit statistics, Alpha158 build (per stock; parallel futures advance it), intraday builders, R2 transfers (bytes), Alpaca/OpenFIGI fetch, and `fetch_us_daily.py` stages.
+  - Wired in: rolling runner (seed × target), trainer (epochs with loss/metric postfix, train/validate dates), prediction, fit statistics, LightGBM (row assembly, boosting rounds with valid rank IC/best), Alpha158 build (per stock; parallel futures advance it), intraday builders, R2 transfers (bytes), Alpaca/OpenFIGI fetch, and `fetch_us_daily.py` stages.
+  - Bars vanish when done, so training also prints persistent `note` lines: one per epoch (losses, metric, `*` on improvement, best, seconds), one per finished target (best epoch/round, test rank IC/IC/top10, `(resumed)`), and one per seed overall. These lines appear even off-TTY, so redirected logs keep the history.
 
 ## Important Files
 

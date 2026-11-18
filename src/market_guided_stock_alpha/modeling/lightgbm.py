@@ -8,6 +8,7 @@ import numpy as np
 
 from market_guided_stock_alpha.dataset.dataset import SequenceSample
 from market_guided_stock_alpha.dataset.layout import FeatureLayout
+from market_guided_stock_alpha.progress import progress
 from market_guided_stock_alpha.training.config import LightGBMTrainingConfig
 from market_guided_stock_alpha.training.metrics import daily_rank_ic
 
@@ -180,6 +181,7 @@ class LightGBMRegressor:
             ]
 
         selection: Dict[str, Any] = {"history": []}
+        rounds = progress(total=config.num_boost_round, desc="boosting", unit="round", leave=False)
 
         def selection_callback(environment: Any) -> None:
             current = {}
@@ -203,6 +205,14 @@ class LightGBMRegressor:
                 selection["best_iteration"] = iteration
                 selection["best_metrics"] = dict(current)
                 selection["best_score_list"] = list(environment.evaluation_result_list)
+            rounds.update(1)
+            rounds.set_postfix(
+                rank_ic="{:.4f}".format(current["mean_rankic"]),
+                best="{:.4f}@{}".format(
+                    selection["best_metrics"]["mean_rankic"], selection["best_iteration"]
+                ),
+                refresh=False,
+            )
             if iteration - int(selection["best_iteration"]) >= config.early_stopping_rounds:
                 raise lightgbm.callback.EarlyStopException(
                     int(selection["best_iteration"]) - 1,
@@ -211,15 +221,18 @@ class LightGBMRegressor:
 
         selection_callback.order = 30
         selection_callback.before_iteration = False
-        self.booster = lightgbm.train(
-            parameters,
-            train_set,
-            num_boost_round=config.num_boost_round,
-            valid_sets=[valid_set],
-            valid_names=["valid"],
-            feval=validation_feval,
-            callbacks=[selection_callback],
-        )
+        try:
+            self.booster = lightgbm.train(
+                parameters,
+                train_set,
+                num_boost_round=config.num_boost_round,
+                valid_sets=[valid_set],
+                valid_names=["valid"],
+                feval=validation_feval,
+                callbacks=[selection_callback],
+            )
+        finally:
+            rounds.close()
         self.best_iteration = int(selection["best_iteration"])
         self.training_record = {
             "seed": int(seed),
@@ -273,7 +286,9 @@ def assemble_supervised_matrix(dataset: Any) -> Dict[str, np.ndarray]:
     processed = []
     raw = []
     row_ptr = [0]
-    for position in range(len(dataset)):
+    for position in progress(
+        range(len(dataset)), desc="assemble LightGBM rows", unit="date", leave=False
+    ):
         sample = dataset[position]
         matrix = flatten_sequence_sample(sample)
         mask = (

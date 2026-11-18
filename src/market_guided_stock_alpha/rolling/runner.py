@@ -27,7 +27,7 @@ from market_guided_stock_alpha.rolling.artifacts import (
     read_prediction_artifact,
     write_prediction_artifact,
 )
-from market_guided_stock_alpha.progress import progress
+from market_guided_stock_alpha.progress import note, progress
 from market_guided_stock_alpha.rolling.prediction import (
     predict_lightgbm_model,
     predict_neural_model,
@@ -90,6 +90,47 @@ class RollingRunConfig:
             raise ValueError("minimum_security_count must be at least two")
         if not isinstance(self.initialization, InitializationMode):
             object.__setattr__(self, "initialization", InitializationMode(str(self.initialization)))
+
+
+def _metric(value: Any) -> str:
+    return "n/a" if value is None else "{:.4f}".format(float(value))
+
+
+def _target_line(seed: int, target_id: str, summary: Mapping[str, Any], resumed: bool) -> str:
+    """One persistent log line per finished target (bars are transient)."""
+    training = summary.get("training") or {}
+    if training.get("best_epoch") is not None:
+        selection = "best epoch {} ({} {})".format(
+            training["best_epoch"],
+            training.get("primary_metric", "valid"),
+            _metric(training.get("best_validation_metric")),
+        )
+    elif training.get("best_iteration") is not None:
+        selection = "best round {} (valid rank IC {})".format(
+            training["best_iteration"],
+            _metric((training.get("best_validation_metrics") or {}).get("mean_rankic")),
+        )
+    else:
+        selection = "no training record"
+    return "seed {} · target {}{}: {} · test rank IC {} · IC {} · top10 {}".format(
+        seed,
+        target_id,
+        " (resumed)" if resumed else "",
+        selection,
+        _metric(summary.get("rank_ic")),
+        _metric(summary.get("ic")),
+        _metric(summary.get("top10")),
+    )
+
+
+def _overall_line(seed: int, overall: Mapping[str, Any]) -> str:
+    return "seed {} overall ({} targets): rank IC {} · IC {} · top10 {}".format(
+        seed,
+        overall.get("target_count"),
+        _metric(overall.get("rank_ic")),
+        _metric(overall.get("ic")),
+        _metric(overall.get("top10")),
+    )
 
 
 def _build_dataset(
@@ -271,10 +312,12 @@ class RollingRunner:
                 prediction_by_seed[int(seed)][target.target_id] = frame
                 target_summaries.append(summary)
                 run_bar.update(1)
+                note(_target_line(seed, target.target_id, summary, resumed))
 
             overall = aggregate_overall(target_summaries)
             overall.update({"seed": int(seed), "kind": "individual_seed_overall"})
             atomic_write_json(run_root / "seed_{}".format(seed) / "overall.json", overall)
+            note(_overall_line(seed, overall))
             seed_results[int(seed)] = {"targets": target_summaries, "overall": overall}
 
         run_bar.close()
@@ -459,9 +502,11 @@ class RollingRunner:
                 prediction_by_seed[int(seed)][target.target_id] = frame
                 target_summaries.append(summary)
                 run_bar.update(1)
+                note(_target_line(seed, target.target_id, summary, resumed))
             overall = aggregate_overall(target_summaries)
             overall.update({"seed": int(seed), "kind": "individual_seed_overall"})
             atomic_write_json(run_root / "seed_{}".format(seed) / "overall.json", overall)
+            note(_overall_line(seed, overall))
             seed_results[int(seed)] = {"targets": target_summaries, "overall": overall}
 
         run_bar.close()

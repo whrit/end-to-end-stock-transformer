@@ -1,6 +1,7 @@
 """Whole-date neural training core, independent of rolling orchestration."""
 
 import math
+import time
 from typing import Any, Dict, List, Mapping, Optional
 
 import torch
@@ -10,7 +11,7 @@ from market_guided_stock_alpha.modeling.transport import (
     forward_date_batch,
     move_date_batch,
 )
-from market_guided_stock_alpha.progress import progress
+from market_guided_stock_alpha.progress import note, progress
 from market_guided_stock_alpha.training.checkpoint import CheckpointManager
 from market_guided_stock_alpha.training.config import TrainingConfig, create_optimizer
 from market_guided_stock_alpha.training.losses import build_loss
@@ -143,6 +144,7 @@ class Trainer:
             range(1, self.config.epochs + 1), desc="epochs", unit="epoch", leave=False
         )
         for epoch in epochs:
+            started = time.monotonic()
             train = self.train_epoch(train_loader, epoch)
             validation = self.validate(valid_loader)
             validation_loss = float(validation["validation_loss"])
@@ -158,11 +160,6 @@ class Trainer:
                 }
             )
             history.append(row)
-            epochs.set_postfix(
-                train_loss="{:.4f}".format(train["train_loss"]),
-                valid="{:.4f}".format(metric),
-                refresh=False,
-            )
             improved = metric > best_metric if maximize else metric < best_metric
             if improved:
                 best_metric = metric
@@ -170,6 +167,26 @@ class Trainer:
                 without_improvement = 0
             else:
                 without_improvement += 1
+            epochs.set_postfix(
+                train_loss="{:.4f}".format(train["train_loss"]),
+                valid="{:.4f}".format(metric),
+                best="{:.4f}@{}".format(best_metric, best_epoch),
+                refresh=False,
+            )
+            note(
+                "  epoch {}/{} · train_loss {:.4f} · val_loss {:.4f} · {} {:.4f}{} · best {:.4f} @ {} · {:.0f}s".format(
+                    epoch,
+                    self.config.epochs,
+                    train["train_loss"],
+                    validation_loss,
+                    self.config.primary_metric,
+                    metric,
+                    " *" if improved else "",
+                    best_metric,
+                    best_epoch,
+                    time.monotonic() - started,
+                )
+            )
             if self.checkpoints is not None and (
                 epoch % self.config.checkpoint_every == 0 or improved
             ):
