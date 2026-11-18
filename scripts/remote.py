@@ -797,7 +797,7 @@ def build_parser() -> argparse.ArgumentParser:
     logs.add_argument("--follow", "-f", action="store_true")
     logs.set_defaults(run=cmd_logs)
     pull = sub.add_parser("pull", help="download a job's run directory")
-    pull.add_argument("job", help="job id or run location")
+    pull.add_argument("job", help="job id, experiment name (its newest job) or run location")
     pull.add_argument("--dest", default="runs")
     pull.add_argument("--checkpoints", action="store_true", help="include model checkpoints")
     pull.set_defaults(run=cmd_pull)
