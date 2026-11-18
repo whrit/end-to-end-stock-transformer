@@ -79,9 +79,13 @@ US data is produced by `scripts/fetch_us_daily.py` from Alpaca (consolidated SIP
 | Storage | `r2://<bucket>/us/v1/raw/*.parquet` (canonical tables + `securities.parquet` + `fetch_manifest.json`), `.../derived/` (artifacts and label), `.../runs/` |
 
 Known limits:
-- **Survivorship bias.** Delisted stocks are included only if Alpaca still lists them as inactive assets and OpenFIGI maps their symbol. `fetch_manifest.json` records how many were mapped and how many were dropped.
-- **No delisting returns.** A stock with no price at t+6 has no label for that anchor.
-- **Daily open not yet verified.** Whether Alpaca's daily `open` equals the official opening-auction price has not been checked. Verify it against the first regular-session minute bar before trusting label-level results.
+- **Survivorship bias.** Delisted stocks are included only if Alpaca still lists them as inactive assets and OpenFIGI maps their symbol. `fetch_manifest.json` records how many were mapped and how many were dropped. Alpaca does serve full daily bars for delisted tickers missing from its asset list, so the gap is the ticker list, not prices. See [the US Phase 2 plan](us_phase2_plan.md).
+- **No delisting returns.** A stock with no price at t+6 has no label for that anchor. See [the US Phase 2 plan](us_phase2_plan.md).
+- **Daily open is a close proxy for the official open (measured).**
+  - Against the primary exchange's opening-auction print (condition `O` on the listing venue; 463 stock-days, 12 symbols, June 2021 and October 2026), Alpaca's daily `open` matches exactly 43% of the time.
+  - Error: median absolute 0.8 bps, 95th percentile 33 bps, mean signed +1.8 bps. The offset appears at both label endpoints (t+1 and t+6), so it largely cancels in the ratio.
+  - The first 09:30 minute bar is no better (median 1.6 bps, 95th percentile 35 bps), so the fetch keeps the daily `open`.
+  - The exact auction price is an optional upgrade in the Phase 2 plan.
 
 R2 credentials come from `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`. Any script argument or config path may be a local path or an `r2://bucket/key` URI. Jobs download remote inputs into a temporary directory and delete it when they finish. Memory-mapped feature artifacts therefore need free local disk equal to their size while a job runs.
 
