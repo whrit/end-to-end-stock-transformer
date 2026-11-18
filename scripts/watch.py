@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run
 """Watch a job's dashboard from any machine via its status snapshot.
 
-Jobs write ``dashboard_status.json`` every 30 s: rolling runs into their run
+Jobs write ``dashboard_status.json`` every 2 s: rolling runs into their run
 directory automatically, other jobs when ``DASHBOARD_STATUS`` is set. Example:
 
     uv run --env-file .env scripts/watch.py \\
@@ -25,7 +25,7 @@ from market_guided_stock_alpha import progress, storage
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("status", help="dashboard_status.json location (local path or r2://)")
-    parser.add_argument("--interval", type=float, default=10.0, help="seconds between polls (default 10)")
+    parser.add_argument("--interval", type=float, default=2.0, help="seconds between polls (default 2)")
     parser.add_argument(
         "--exit-when-done", action="store_true", help="quit once the job reports a final status"
     )

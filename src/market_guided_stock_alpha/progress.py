@@ -15,7 +15,7 @@ shown depends on where the job runs:
 
 Optional sinks, for any job: ``log_to(path)`` / ``DASHBOARD_LOG`` appends every
 tape line to a file; ``status_to(location)`` / ``DASHBOARD_STATUS`` writes a
-JSON snapshot every 30 s (local path or ``r2://``) that ``scripts/watch.py``
+JSON snapshot every 2 s (local path or ``r2://``) that ``scripts/watch.py``
 renders on another machine. On macOS a notification is sent when a dashboard
 job (or any job with ``DASHBOARD_NOTIFY=1``) of 60 s or more ends.
 
@@ -93,7 +93,7 @@ BORDER = "grey37"
 SPARK = "▁▂▃▄▅▆▇█"
 COMPACT_WIDTH = 130
 COMPACT_HEIGHT = 35
-STATUS_INTERVAL_SECONDS = 30.0
+STATUS_INTERVAL_SECONDS = 2.0  # snapshot ≈ 8 kB; at 2 s ≈ 1.3 M R2 writes per month of non-stop training
 NOTIFY_MIN_SECONDS = 60.0
 KEY_HINTS = "s stop after target · ↑↓ scroll · G live · t filter · Ctrl-C abort"
 # The watcher only views a job: Ctrl-C closes the view, and stopping is `remote.py stop JOB`.
@@ -1172,7 +1172,7 @@ def _open_log(path: Any) -> None:
 
 
 def status_to(location: Any) -> None:
-    """Write a JSON status snapshot to ``location`` every 30 s and at exit.
+    """Write a JSON status snapshot to ``location`` every 2 s and at exit.
 
     Active only inside ``run_main`` jobs; ``DASHBOARD_STATUS`` takes precedence.
     """

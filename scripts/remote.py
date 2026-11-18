@@ -337,7 +337,7 @@ def cmd_stop(args: argparse.Namespace) -> int:
         return 0
     store.put_json("{}/control.json".format(args.job), {"stop": True, "requested_at": jobs.now_iso()})
     console.print(
-        Text("stop requested: {} finishes its current target, saves, and exits (within ~30 s of the next check)".format(args.job), style="yellow")
+        Text("stop requested: {} finishes its current target, saves, and exits (seen within a few seconds)".format(args.job), style="yellow")
     )
     return 0
 
