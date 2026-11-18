@@ -355,7 +355,7 @@ uv run --env-file .env scripts/remote.py instances   # 你的 vast.ai 实例及�
 - 仅限北美（美国、加拿大、墨西哥）；
 - GPU 与主机驱动必须能运行锁定的 CUDA 版 torch（Turing 及以上架构、CUDA 13+ 驱动；CUDA 最低版本从 `uv.lock` 读取）。
 
-报价始终按价格从低到高排列。这些限制是 `scripts/remote.py` 中 vast.ai 部分开头的常量。
+报价按价格从低到高排列；若存在更便宜（或同价）且单卡 TFLOPS 不低于它的报价，则该报价不显示，因此每一行都是该价位下算力最高的选择。由于训练任务只使用一张 GPU，TFLOPS 按单卡计算。表格中该列与 vast.ai 的 DLPerf 评分并列显示。这些限制是 `scripts/remote.py` 中 vast.ai 部分开头的常量。
 
 实例使用与本机相同的 torch。任务会按 `uv.lock` 安装 torch 及其 CUDA 运行库（目前为 torch 2.15.0 + CUDA 13.2），因此容器镜像只需提供 GPU 访问。`rent` 使用 NVIDIA 的最小镜像 `nvidia/cuda:13.0.3-base-ubuntu24.04`，其中不含 torch 或 CUDA 库。每个任务会在 `job.log` 开头和 `state.json` 中记录实际使用的 Python、torch、CUDA、cuDNN 与 GPU。
 

@@ -464,8 +464,8 @@ def _vast(method: str, path: str, body: Optional[Dict[str, Any]] = None) -> Dict
 
 
 def search_offers(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """On-demand North American offers within budget and network limits,
-    cheapest first (faster GPUs first among equal prices)."""
+    """On-demand North American offers within budget and network limits:
+    the fastest (TFLOPS) offer at each price, cheapest first (``_best_value``)."""
     max_price, min_network = _checked_limits(filters["max_price"], filters["min_network"])
     query: Dict[str, Any] = {
         "rentable": {"eq": True},
@@ -494,15 +494,31 @@ def search_offers(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
         # Substring match: "4090", "3090", "a4000", "rtx_5080" all work.
         needle = str(filters["gpu"]).lower().replace("_", " ")
         offers = [offer for offer in offers if needle in str(offer.get("gpu_name", "")).lower()]
-    offers.sort(key=lambda offer: (float(offer.get("dph_total") or 0.0), -float(offer.get("dlperf") or 0.0)))
-    return offers
+    return _best_value(offers)
+
+
+def _best_value(offers: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Cheapest first, keeping only offers with more TFLOPS per GPU than every
+    cheaper (or equal-priced) one: each row is the most compute a single-GPU job
+    can use at its price. Per GPU because ``run_rolling.py`` trains on one GPU."""
+    ranked = sorted(offers, key=lambda offer: (float(offer.get("dph_total") or 0.0), -_tflops(offer)))
+    kept: List[Dict[str, Any]] = []
+    for offer in ranked:
+        if not kept or _tflops(offer) > _tflops(kept[-1]):
+            kept.append(offer)
+    return kept
+
+
+def _tflops(offer: Dict[str, Any]) -> float:
+    """TFLOPS of one GPU of the offer (vast.ai's ``total_flops`` sums all GPUs)."""
+    return float(offer.get("total_flops") or 0.0) / max(int(offer.get("num_gpus") or 1), 1)
 
 
 def _offer_table(offers: List[Dict[str, Any]]) -> Table:
     table = Table(header_style="bold dodger_blue1", border_style="grey37", title_style="bold dodger_blue1")
     for name, justify in (
         ("#", "right"), ("GPU", "left"), ("VRAM", "right"), ("RAM", "right"), ("disk", "right"),
-        ("$/h", "right"), ("DLPerf", "right"), ("perf/$", "right"), ("reliab.", "right"),
+        ("$/h", "right"), ("TFLOPS/GPU", "right"), ("DLPerf", "right"), ("perf/$", "right"), ("reliab.", "right"),
         ("net ↑", "right"), ("net ↓", "right"), ("CUDA", "right"), ("location", "left"),
     ):
         table.add_column(name, justify=justify, no_wrap=True)
@@ -517,6 +533,7 @@ def _offer_table(offers: List[Dict[str, Any]]) -> Table:
             "{:.0f} GB".format(float(offer.get("cpu_ram") or 0) / 1024),
             "{:.0f} GB".format(float(offer.get("disk_space") or 0)),
             Text("${:.3f}".format(price), style="green"),
+            Text("{:.1f}".format(_tflops(offer)), style="bold"),
             "{:.0f}".format(perf),
             Text("{:.0f}".format(perf / price if price else 0.0), style="cyan"),
             Text("{:.1%}".format(reliability), style="green" if reliability >= 0.99 else "yellow"),
@@ -551,7 +568,7 @@ def _ask_filters(filters: Dict[str, Any]) -> Dict[str, Any]:
     console.print(
         Text(
             "Always applied: ≤ ${:.2f}/h · ≥ {:.0f} Mb/s up and down · North America ({}) · "
-            "Turing+ GPU with CUDA ≥ {:.0f} driver (locked torch) · cheapest first".format(
+            "Turing+ GPU with CUDA ≥ {:.0f} driver (locked torch) · cheapest first, slower-and-pricier offers hidden".format(
                 MAX_PRICE_PER_HOUR, MIN_NETWORK_MBPS, ", ".join(REGIONS), MIN_HOST_CUDA
             ),
             style="dim",
@@ -738,7 +755,7 @@ def build_parser() -> argparse.ArgumentParser:
     rent.add_argument("--disk", type=float, default=60.0, help="disk to allocate, GB (data + environment ≈ 15 GB)")
     rent.add_argument("--min-reliability", type=float, default=0.98)
     rent.add_argument("--unverified", action="store_true", help="include unverified hosts")
-    rent.add_argument("--show", type=int, default=20, help="offers to list (cheapest first)")
+    rent.add_argument("--show", type=int, default=20, help="offers to list (cheapest first, most TFLOPS per price)")
     rent.add_argument("--pick", type=int, default=None, help="offer number to rent without prompting")
     rent.add_argument("--yes", action="store_true", help="no prompts (needs --pick); still prints what it rents")
     rent.add_argument("--image", default=DEFAULT_IMAGE)
