@@ -3,6 +3,7 @@
 import tempfile
 import sys
 import unittest
+from unittest import mock
 from pathlib import Path
 
 import numpy as np
@@ -232,6 +233,61 @@ class TrainingAndCheckpointTest(unittest.TestCase):
                     WholeDateLoader(TinyDataset(layout, 1)), epoch=1
                 )
                 self.assertTrue(np.isfinite(output["train_loss"]))
+
+
+class CountingDataset(TinyDataset):
+    def __init__(self, layout, count):
+        super().__init__(layout, count)
+        self.reads = 0
+
+    def __getitem__(self, position):
+        self.reads += 1
+        return super().__getitem__(position)
+
+
+class EpochCacheTest(unittest.TestCase):
+    def _epochs(self, budget):
+        layout = FeatureLayout.stage1()
+        cached_data = CountingDataset(layout, 5)
+        cached = WholeDateLoader(cached_data, shuffle=True, seed=3, cache=True)
+        plain = WholeDateLoader(TinyDataset(layout, 5), shuffle=True, seed=3)
+        with mock.patch("market_guided_stock_alpha.modeling.transport.ram_cache_budget", return_value=budget):
+            for epoch in (1, 2, 3):
+                cached.set_epoch(epoch)
+                plain.set_epoch(epoch)
+                for got, want in zip(list(cached), list(plain), strict=True):
+                    self.assertEqual(got.prediction_date, want.prediction_date)
+                    self.assertTrue(torch.equal(got.stock_features, want.stock_features))
+                    self.assertTrue(torch.equal(got.labels_raw, want.labels_raw))
+        return cached_data.reads
+
+    def test_cache_builds_each_date_once_and_keeps_batches_and_order(self):
+        self.assertEqual(self._epochs(1 << 40), 5)
+
+    def test_dates_over_the_memory_budget_are_rebuilt_each_epoch(self):
+        # 5 reads to try caching, then all 5 dates rebuilt in each of 3 epochs.
+        self.assertEqual(self._epochs(0), 5 + 15)
+
+    def test_training_results_match_with_and_without_cache(self):
+        layout = FeatureLayout.stage1()
+        results = []
+        for cache in (False, True):
+            config = TrainingConfig(
+                epochs=2,
+                optimizer=OptimizerConfig(learning_rate=1e-3, gradient_clip_value=3.0),
+                early_stopping=EarlyStoppingConfig(enabled=False, patience=1, minimum_epochs=1),
+                seed=7,
+            )
+            torch.manual_seed(7)
+            model = MasterModel.from_layout(layout, d_model=16, temporal_heads=4, spatial_heads=2, dropout=0.1)
+            trainer = Trainer(model, config, device="cpu")
+            with mock.patch("market_guided_stock_alpha.modeling.transport.ram_cache_budget", return_value=1 << 40):
+                history = trainer.fit(
+                    WholeDateLoader(TinyDataset(layout, 3), shuffle=True, seed=7, cache=cache),
+                    WholeDateLoader(TinyDataset(layout, 2), cache=cache),
+                )["history"]
+            results.append([(row["train_loss"], row["validation_loss"]) for row in history])
+        self.assertEqual(results[0], results[1])
 
 
 @unittest.skipUnless(torch.backends.mps.is_available(), "MPS is not available")

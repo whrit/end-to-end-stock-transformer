@@ -557,9 +557,14 @@ class RollingRunner:
                         self.device,
                         checkpoint_manager,
                     )
+                    # CUDA: build each date's batch once and reuse it every epoch
+                    # (same batches, same order). MPS/CPU keep the per-epoch path.
+                    device = resolve_device(self.device)
+                    cache = device.type == "cuda"
+                    loader_device = device if cache else torch.device("cpu")
                     training_result = trainer.fit(
-                        WholeDateLoader(train_dataset, shuffle=True, seed=seed),
-                        WholeDateLoader(valid_dataset, shuffle=False, seed=seed),
+                        WholeDateLoader(train_dataset, shuffle=True, seed=seed, device=loader_device, cache=cache),
+                        WholeDateLoader(valid_dataset, shuffle=False, seed=seed, device=loader_device, cache=cache),
                     )
                     if not best_path.is_file():
                         raise RuntimeError("training did not publish a best checkpoint")

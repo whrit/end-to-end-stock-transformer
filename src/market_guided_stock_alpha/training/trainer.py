@@ -75,9 +75,10 @@ class Trainer:
             result = self._loss(predictions, batch)
             loss = result["loss"]
             loss.backward()
-            for parameter in self.model.parameters():
-                if parameter.grad is not None and not bool(torch.isfinite(parameter.grad).all()):
-                    raise FloatingPointError("non-finite model gradient")
+            gradients = [parameter.grad for parameter in self.model.parameters() if parameter.grad is not None]
+            # One device sync for all parameters instead of one per parameter.
+            if gradients and not bool(torch.stack([torch.isfinite(g).all() for g in gradients]).all()):
+                raise FloatingPointError("non-finite model gradient")
             torch.nn.utils.clip_grad_value_(
                 self.model.parameters(), self.config.optimizer.gradient_clip_value
             )

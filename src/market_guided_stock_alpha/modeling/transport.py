@@ -1,13 +1,25 @@
 """Thin whole-date tensor transport from canonical dataset samples."""
 
+import os
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Any, Iterator, Mapping, Optional, Tuple
+from typing import Any, Iterator, List, Mapping, Optional, Tuple
 
 import numpy as np
 import pandas as pd
+import psutil
 import torch
 
 from market_guided_stock_alpha.dataset.dataset import SequenceSample
+from market_guided_stock_alpha.progress import note, progress
+
+GIB = 1024 ** 3
+# Safety margins for the epoch cache (used on CUDA only; see WholeDateLoader).
+GPU_RESERVE_FRACTION = 0.30  # of GPU memory, kept free for activations
+GPU_RESERVE_MIN = 6 * GIB  # d_model 512 peaks near 3.3 GB at 2,500 stocks per date
+RAM_RESERVE_FRACTION = 0.15  # of the (container) memory limit
+RAM_RESERVE_MIN = 8 * GIB
+MAX_CACHE_WORKERS = 16
 
 
 def _raw_label_device(target: torch.device) -> torch.device:
@@ -123,8 +135,73 @@ def forward_date_batch(model: torch.nn.Module, batch: DateBatch) -> torch.Tensor
     return predictions
 
 
+def _container_memory() -> Optional[Tuple[int, int]]:
+    """(limit, usage) of this container's cgroup memory limit, or None if unlimited.
+
+    Containers (e.g. vast.ai) report the whole host's RAM through psutil; the
+    cgroup limit is what actually triggers the OOM killer."""
+    for limit_path, usage_path in (
+        ("/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory.current"),
+        ("/sys/fs/cgroup/memory/memory.limit_in_bytes", "/sys/fs/cgroup/memory/memory.usage_in_bytes"),
+    ):
+        try:
+            with open(limit_path) as handle:
+                limit = handle.read().strip()
+            with open(usage_path) as handle:
+                usage = int(handle.read().strip())
+        except (OSError, ValueError):
+            continue
+        if limit == "max" or int(limit) >= 1 << 60:
+            return None
+        return int(limit), usage
+    return None
+
+
+def ram_cache_budget() -> int:
+    """Bytes of RAM the epoch cache may use, leaving a margin under the tighter
+    of the machine's available memory and the container limit."""
+    memory = psutil.virtual_memory()
+    free, total = int(memory.available), int(memory.total)
+    container = _container_memory()
+    if container is not None:
+        limit, usage = container
+        free, total = min(free, limit - usage), min(total, limit)
+    return max(0, free - max(RAM_RESERVE_MIN, int(RAM_RESERVE_FRACTION * total)))
+
+
+def gpu_cache_budget(device: torch.device) -> int:
+    """Bytes of GPU memory the epoch cache may use, leaving room for training."""
+    if device.type != "cuda":
+        return 0
+    free, total = torch.cuda.mem_get_info(device)
+    free += torch.cuda.memory_reserved(device) - torch.cuda.memory_allocated(device)
+    return max(0, int(free) - max(GPU_RESERVE_MIN, int(GPU_RESERVE_FRACTION * total)))
+
+
+def _cache_workers() -> int:
+    try:
+        count = len(os.sched_getaffinity(0))
+    except AttributeError:  # macOS
+        count = os.cpu_count() or 1
+    return max(1, min(count, MAX_CACHE_WORKERS))
+
+
+def _batch_bytes(batch: DateBatch) -> int:
+    tensors = [
+        batch.stock_features, batch.market_features, batch.labels, batch.labels_raw,
+        batch.label_mask, batch.stock_mask, batch.intraday_market_features,
+    ]
+    return sum(t.element_size() * t.numel() for t in tensors if t is not None)
+
+
 class WholeDateLoader:
-    """Deterministic iterator; it never creates random stock mini-batches."""
+    """Deterministic iterator; it never creates random stock mini-batches.
+
+    With ``cache=True`` every date's batch is built once (in parallel threads)
+    and reused each epoch: on the GPU while ``gpu_cache_budget`` allows, then in
+    RAM while ``ram_cache_budget`` allows; dates beyond both are rebuilt every
+    epoch as without the cache. Batches and their order are unchanged, so
+    training results are identical with or without it."""
 
     date_batch_size = 1
 
@@ -134,12 +211,15 @@ class WholeDateLoader:
         shuffle: bool = False,
         seed: int = 0,
         device: Any = "cpu",
+        cache: bool = False,
     ) -> None:
         self.dataset = dataset
         self.shuffle = bool(shuffle)
         self.seed = int(seed)
         self.device = torch.device(device)
         self.epoch = 0
+        self.cache = bool(cache)
+        self._cached: Optional[List[Optional[DateBatch]]] = None
 
     def set_epoch(self, epoch: int) -> None:
         self.epoch = int(epoch)
@@ -147,17 +227,52 @@ class WholeDateLoader:
     def __len__(self) -> int:
         return len(self.dataset)
 
+    def _build(self, position: int, device: torch.device) -> DateBatch:
+        value = self.dataset[int(position)]
+        if isinstance(value, DateBatch):
+            return value if value.stock_features.device == device else move_date_batch(value, device)
+        return adapt_sequence_sample(value, device)
+
+    def _fill_cache(self) -> List[Optional[DateBatch]]:
+        gpu_left = gpu_cache_budget(self.device)
+        ram_left = ram_cache_budget()
+        cpu = torch.device("cpu")
+        cached: List[Optional[DateBatch]] = []
+        sizes = {"GPU": 0, "RAM": 0}
+        with ThreadPoolExecutor(_cache_workers()) as pool:
+            built = pool.map(lambda position: self._build(position, cpu), range(len(self.dataset)))
+            for batch in progress(built, desc="cache dates", unit="date", total=len(self.dataset), leave=False):
+                size = _batch_bytes(batch)
+                if size <= gpu_left:
+                    gpu_left -= size
+                    sizes["GPU"] += size
+                    cached.append(move_date_batch(batch, self.device))
+                elif size <= ram_left:
+                    ram_left -= size
+                    sizes["RAM"] += size
+                    cached.append(batch)
+                else:
+                    cached.append(None)
+        rebuilt = sum(1 for batch in cached if batch is None)
+        note(
+            "cached {} dates: {:.1f} GiB on GPU, {:.1f} GiB in RAM{}".format(
+                len(cached) - rebuilt, sizes["GPU"] / GIB, sizes["RAM"] / GIB,
+                ", {} rebuilt each epoch (memory limit)".format(rebuilt) if rebuilt else "",
+            )
+        )
+        return cached
+
     def __iter__(self) -> Iterator[DateBatch]:
         positions = np.arange(len(self.dataset), dtype="int64")
         if self.shuffle:
             np.random.default_rng(self.seed + self.epoch).shuffle(positions)
+        if self.cache and self._cached is None:
+            self._cached = self._fill_cache()
         for position in positions:
-            value = self.dataset[int(position)]
-            batch = (
-                value
-                if isinstance(value, DateBatch)
-                else adapt_sequence_sample(value, self.device)
-            )
-            if isinstance(value, DateBatch) and value.stock_features.device != self.device:
-                batch = move_date_batch(value, self.device)
-            yield batch
+            batch = self._cached[position] if self._cached is not None else None
+            if batch is None:
+                yield self._build(int(position), self.device)
+            elif batch.stock_features.device != self.device:
+                yield move_date_batch(batch, self.device)
+            else:
+                yield batch
