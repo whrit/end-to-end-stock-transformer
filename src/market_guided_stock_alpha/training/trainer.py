@@ -11,7 +11,7 @@ from market_guided_stock_alpha.modeling.transport import (
     forward_date_batch,
     move_date_batch,
 )
-from market_guided_stock_alpha.progress import metric as show_metric, note, progress, reset_metrics
+from market_guided_stock_alpha.progress import duration_text, metric as show_metric, note, progress, reset_metrics
 from market_guided_stock_alpha.training.checkpoint import CheckpointManager
 from market_guided_stock_alpha.training.config import TrainingConfig, create_optimizer
 from market_guided_stock_alpha.training.losses import build_loss
@@ -169,25 +169,35 @@ class Trainer:
                 without_improvement = 0
             else:
                 without_improvement += 1
+            seconds = time.monotonic() - started
+            schedule = self.config.early_stopping
+            patience = (
+                "no gain {}/{}".format(without_improvement, schedule.patience) if schedule.enabled else ""
+            )
             epochs.set_postfix(
                 loss="{:.4f}".format(train["train_loss"]),
                 valid="{:.4f}".format(metric),
                 best="{:.4f}@{}".format(best_metric, best_epoch),
+                last=duration_text(seconds),
+                **({"patience": "{}/{}".format(without_improvement, schedule.patience)} if schedule.enabled else {})
             )
             show_metric("train loss", train["train_loss"], higher_is_better=False)
             show_metric("val loss", validation_loss, higher_is_better=False)
             show_metric("val " + self.config.primary_metric, metric, higher_is_better=maximize)
+            show_metric("epoch seconds", seconds, higher_is_better=False, fmt="{:.1f}")
+            short = {"mean_rank_ic": "rIC"}.get(self.config.primary_metric, self.config.primary_metric)
             note(
                 ("    epoch {:>3}/{:<3}".format(epoch, self.config.epochs), "bold"),
-                ("  train_loss ", "dim"),
+                ("{:>8}".format(duration_text(seconds)), "cyan"),
+                ("  train ", "dim"),
                 "{:.4f}".format(train["train_loss"]),
-                ("  val_loss ", "dim"),
+                ("  val ", "dim"),
                 "{:.4f}".format(validation_loss),
-                ("  {} ".format(self.config.primary_metric), "dim"),
+                ("  {} ".format(short), "dim"),
                 ("{:.4f}".format(metric), "bold green" if improved else "white"),
-                ("  ★ new best" if improved else "  best {:.4f} @ {}".format(best_metric, best_epoch),
+                ("  ★ new best" if improved else "  best {:.4f}@{}".format(best_metric, best_epoch),
                  "green" if improved else "dim"),
-                ("  {:.0f}s".format(time.monotonic() - started), "cyan"),
+                ("  {}".format(patience) if patience and not improved else "", "dim"),
                 detail=True,
             )
             if self.checkpoints is not None and (
@@ -201,7 +211,6 @@ class Trainer:
                     history,
                     improved,
                 )
-            schedule = self.config.early_stopping
             if (
                 schedule.enabled
                 and epoch >= schedule.minimum_epochs

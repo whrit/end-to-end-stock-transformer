@@ -201,6 +201,16 @@ def _duration(seconds: float) -> str:
     return str(timedelta(seconds=int(max(seconds, 0))))
 
 
+def duration_text(seconds: float) -> str:
+    """Short human duration: ``42s``, ``7m 12s``, ``1h 03m``."""
+    seconds = int(round(max(seconds, 0)))
+    if seconds < 60:
+        return "{}s".format(seconds)
+    if seconds < 3600:
+        return "{}m {:02d}s".format(seconds // 60, seconds % 60)
+    return "{}h {:02d}m".format(seconds // 3600, seconds % 3600 // 60)
+
+
 def _plain(renderable: Any, width: int = 120) -> str:
     console = Console(file=io.StringIO(), width=width, color_system=None, highlight=False)
     console.print(renderable)
@@ -563,20 +573,21 @@ def _metrics_table(metrics: Mapping[str, Mapping[str, Any]]) -> Table:
         if not values:
             continue
         higher = entry["higher"]
+        fmt = str(entry.get("fmt") or "{:.4f}")
         last = values[-1]
         change = Text("")
         if len(values) > 1:
             delta = last - values[-2]
             good = delta > 0 if higher else delta < 0
             change = Text(
-                "{}{:.4f}".format("▲" if delta > 0 else "▼" if delta < 0 else "■", abs(delta)),
+                "{}{}".format("▲" if delta > 0 else "▼" if delta < 0 else "■", fmt.format(abs(delta))),
                 style="green" if good else "red" if delta else "dim",
             )
         best_index = values.index(max(values) if higher else min(values))
         best = Text.assemble(
-            ("{:.4f}".format(values[best_index]), "green"), (" #{}".format(best_index + 1), "dim")
+            (fmt.format(values[best_index]), "green"), (" #{}".format(best_index + 1), "dim")
         )
-        table.add_row(label, "{:.4f}".format(last), change, best, _sparkline(values))
+        table.add_row(label, fmt.format(last), change, best, _sparkline(values))
     return table
 
 
@@ -685,6 +696,41 @@ def _gauge(fraction: float, label: str) -> Text:
     return Text.assemble(("━" * filled, style), ("━" * (16 - filled), "grey30"), " " + label)
 
 
+_GPU_ACTIVITY: Dict[str, Any] = {"at": float("-inf"), "value": None, "missing": False}
+
+
+def _gpu_activity() -> Optional[Tuple[float, str]]:
+    """(utilization %, label) from ``nvidia-smi``, cached for 2 s; None if unavailable."""
+    now = time.monotonic()
+    if _GPU_ACTIVITY["missing"] or now - _GPU_ACTIVITY["at"] < 2.0:
+        return _GPU_ACTIVITY["value"]
+    _GPU_ACTIVITY["at"] = now
+    try:
+        output = subprocess.run(
+            ["nvidia-smi", "--query-gpu=utilization.gpu,temperature.gpu,power.draw,power.limit",
+             "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=2,
+        ).stdout
+    except FileNotFoundError:
+        _GPU_ACTIVITY["missing"] = True
+        return None
+    except (OSError, subprocess.SubprocessError):
+        return _GPU_ACTIVITY["value"]
+    fields = [field.strip() for field in (output.splitlines() or [""])[0].split(",")]
+    try:
+        utilization = float(fields[0])
+    except (ValueError, IndexError):
+        return _GPU_ACTIVITY["value"]
+    parts = ["{:.0f}% busy".format(utilization)]
+    try:
+        parts.append("{:.0f}°C".format(float(fields[1])))
+        parts.append("{:.0f}/{:.0f} W".format(float(fields[2]), float(fields[3])))
+    except (ValueError, IndexError):  # some GPUs report [N/A]
+        pass
+    _GPU_ACTIVITY["value"] = (utilization, " · ".join(parts))
+    return _GPU_ACTIVITY["value"]
+
+
 def _system_table() -> Table:
     table = Table.grid(padding=(0, 1))
     table.add_column(style="dim")
@@ -713,19 +759,23 @@ def _system_table() -> Table:
                 # Between steps only weights/optimizer state are allocated; per-step
                 # activations come and go, so also show the peak and what the process holds.
                 _free, total = torch.cuda.mem_get_info()
-                reserved = torch.cuda.memory_reserved()
+                peak = torch.cuda.max_memory_allocated()
                 table.add_row(
                     "CUDA",
                     _gauge(
-                        reserved / total,
+                        peak / total,
                         "{} in use · peak {} · {} held of {}".format(
                             _binary(torch.cuda.memory_allocated()),
-                            _binary(torch.cuda.max_memory_allocated()),
-                            _binary(reserved),
+                            _binary(peak),
+                            _binary(torch.cuda.memory_reserved()),
                             _binary(total),
                         ),
                     ),
                 )
+                busy = _gpu_activity()
+                if busy is not None:
+                    utilization, label = busy
+                    table.add_row("GPU", _gauge(utilization / 100.0, label))
         except Exception:  # GPU stats are best-effort decoration
             pass
     disk = shutil.disk_usage(tempfile.gettempdir())
@@ -839,7 +889,7 @@ def _snapshot(status: str) -> Dict[str, Any]:
         "progress_rows": len(_progress.tasks),
         "progress_ansi": _ansi(_progress, 160),
         "metrics": {
-            label: {"values": list(entry["values"]), "higher": entry["higher"]}
+            label: {"values": list(entry["values"]), "higher": entry["higher"], "fmt": entry.get("fmt")}
             for label, entry in dict(_metrics).items()
         },
         "tape": [[stamp, line.markup, detail] for stamp, line, detail in list(_tape)[-400:]],
@@ -1093,9 +1143,9 @@ def board(renderable: Any, title: str = "BOARD") -> None:
     _board, _board_title = renderable, title
 
 
-def metric(label: str, value: float, higher_is_better: bool = True) -> None:
-    """Append ``value`` to a METRICS row."""
-    entry = _metrics.setdefault(label, {"values": [], "higher": higher_is_better})
+def metric(label: str, value: float, higher_is_better: bool = True, fmt: str = "{:.4f}") -> None:
+    """Append ``value`` to a METRICS row (``fmt`` formats its numbers)."""
+    entry = _metrics.setdefault(label, {"values": [], "higher": higher_is_better, "fmt": fmt})
     entry["values"].append(float(value))
 
 

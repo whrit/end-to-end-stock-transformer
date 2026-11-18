@@ -43,6 +43,7 @@ from market_guided_stock_alpha.progress import (
     header,
     log_to,
     note,
+    duration_text,
     progress,
     stop_requested,
     summary as summarize_job,
@@ -145,6 +146,7 @@ def _target_parts(
     summary: Mapping[str, Any],
     resumed: bool,
     delta: Optional[float] = None,
+    seconds: Optional[float] = None,
 ) -> Tuple[Any, ...]:
     """One persistent log line per finished target (bars are transient)."""
     return (
@@ -152,6 +154,7 @@ def _target_parts(
         ("seed {} ".format(seed), "bold"),
         ("target {}".format(target_id), "bold cyan"),
         (" (resumed)" if resumed else "", "dim"),
+        ("  {} in {}".format(_epochs(summary), duration_text(seconds)) if seconds is not None else "", "cyan"),
         ("  best ", "dim"),
         _selection(summary),
         ("  test rank IC ", "dim"),
@@ -163,6 +166,12 @@ def _target_parts(
         ("  Δ vs ref " if delta is not None else "", "dim"),
         _metric(delta) if delta is not None else ("", ""),
     )
+
+
+def _epochs(summary: Mapping[str, Any]) -> str:
+    """``"10 ep"`` for neural targets (from the saved training history), else ``"—"``."""
+    history = (summary.get("training") or {}).get("history")
+    return "{} ep".format(len(history)) if isinstance(history, list) else "—"
 
 
 # (seed, target_id) -> that target's metrics.json in a reference run, or None.
@@ -186,12 +195,15 @@ def _blotter(
     overall: Optional[Mapping[str, Any]] = None,
     reference: Optional[Reference] = None,
     compact: bool = False,
+    times: Optional[Mapping[str, float]] = None,
 ) -> Table:
     """Target blotter: status and test metrics for every target of one seed.
 
     ``compact`` (the live board) keeps rank IC and top10 only, so it fits half
-    the screen; the exit summary shows every metric.
+    the screen; the exit summary shows every metric. ``times`` holds wall
+    seconds of targets trained this session (resumed targets show "—").
     """
+    times = times or {}
     table = Table(
         title=None if overall is None else "seed {} · targets".format(seed),
         title_style="bold dodger_blue1",
@@ -204,6 +216,8 @@ def _blotter(
     table.add_column("target", no_wrap=True)
     table.add_column("status", no_wrap=True)
     table.add_column("best (valid)", no_wrap=True)
+    table.add_column("epochs", justify="right", no_wrap=True)
+    table.add_column("time", justify="right", no_wrap=True)
     for name in names:
         table.add_column(labels[name], justify="right", no_wrap=True)
     if reference is not None:
@@ -212,24 +226,34 @@ def _blotter(
     def cells(row: Mapping[str, Any]) -> List[Text]:
         return [Text(*_metric(row.get(name))) for name in names]
 
+    def took(target_id: str) -> Text:
+        seconds = times.get(target_id)
+        return Text(duration_text(seconds), style="cyan") if seconds is not None else Text("—", style="dim")
+
     for target in targets:
         summary = done.get(target.target_id)
         if summary is not None:
-            row = [target.target_id, Text("DONE", style="green"), _selection(summary)] + cells(summary)
+            row = [
+                target.target_id, Text("DONE", style="green"), _selection(summary),
+                Text(_epochs(summary), style="dim"), took(target.target_id),
+            ] + cells(summary)
             if reference is not None:
                 delta = _delta(reference, seed, target.target_id, summary)
                 row.append(Text(*_metric(delta)) if delta is not None else Text("—", style="dim"))
             table.add_row(*row)
         elif target.target_id == current:
             table.add_row(
-                target.target_id, Text("TRAIN", style="bold yellow"), "", *[Text("···", style="dim")] * len(names)
+                target.target_id, Text("TRAIN", style="bold yellow"), "", "", "",
+                *[Text("···", style="dim")] * len(names)
             )
         else:
             table.add_row(Text(target.target_id, style="dim"), Text("QUEUED", style="dim"))
     if overall is not None:
         table.add_section()
+        total = Text(duration_text(sum(times.values())), style="bold cyan") if times else Text("")
         table.add_row(
-            Text("OVERALL", style="bold"), Text("{} targets".format(overall.get("target_count")), style="dim"), "", *cells(overall)
+            Text("OVERALL", style="bold"), Text("{} targets".format(overall.get("target_count")), style="dim"),
+            "", "", total, *cells(overall)
         )
     return table
 
@@ -319,12 +343,17 @@ class _RunMonitor(object):
         self.curve: List[Tuple[float, float]] = []
         self.marks: List[int] = []
         self.started = time.monotonic()
+        self.run_started = self.started
+        # Display only: wall seconds of targets trained this session, per seed.
+        self.seconds: Dict[int, Dict[str, float]] = {int(seed): {} for seed in config.seeds}
+        self.seed_started: Dict[int, float] = {}
         self.bar = progress(
             total=len(config.seeds) * len(targets), desc=config.experiment_name, unit="target"
         )
 
     def start(self, seed: int, target: RollingTarget) -> None:
         self.started = time.monotonic()
+        self.seed_started.setdefault(int(seed), self.started)
         if not self.done[int(seed)]:
             self.curve, self.marks = [], []
         self.bar.set_postfix_str("seed {} · target {}".format(seed, target.target_id))
@@ -340,11 +369,16 @@ class _RunMonitor(object):
         resumed: bool,
     ) -> None:
         seed = int(seed)
+        seconds: Optional[float] = None
         if not resumed:
-            self.timings.append((time.monotonic() - self.started, max(len(target.train_dates), 1)))
+            seconds = time.monotonic() - self.started
+            self.timings.append((seconds, max(len(target.train_dates), 1)))
+            self.seconds[seed][target.target_id] = seconds
         self.done[seed][target.target_id] = summary
         self.bar.update(1)
-        note(*_target_parts(seed, target.target_id, summary, resumed, _delta(self.reference, seed, target.target_id, summary)))
+        note(*_target_parts(
+            seed, target.target_id, summary, resumed, _delta(self.reference, seed, target.target_id, summary), seconds
+        ))
         _summary, daily = evaluate_target(frame)
         spreads = _long_short_spread(frame)
         if self.curve:
@@ -375,7 +409,12 @@ class _RunMonitor(object):
             )
 
     def seed_done(self, seed: int, overall: Mapping[str, Any]) -> None:
-        note(_blotter(seed, self.targets, self.done[int(seed)], None, overall, self.reference))
+        seed = int(seed)
+        note(_blotter(seed, self.targets, self.done[seed], None, overall, self.reference, times=self.seconds[seed]))
+        note(
+            ("■ seed {} done in {}".format(seed, duration_text(time.monotonic() - self.seed_started.get(seed, self.run_started))), "bold cyan"),
+            ("  · run so far {}".format(duration_text(time.monotonic() - self.run_started)), "dim"),
+        )
         summarize_job("seed {} rank IC {}".format(seed, _metric(overall.get("rank_ic"))[0]))
 
     def ensemble_done(self, summaries: Sequence[Mapping[str, Any]], overall: Mapping[str, Any]) -> None:
@@ -388,6 +427,11 @@ class _RunMonitor(object):
     def close(self) -> None:
         self.bar.close()
         eta(None)
+        trained = sum(len(times) for times in self.seconds.values())
+        note(
+            ("■ run done in {}".format(duration_text(time.monotonic() - self.run_started)), "bold cyan"),
+            ("  · {} targets trained this session".format(trained), "dim"),
+        )
 
     def _estimate(self, seed: int) -> None:
         """ETA from seconds per training date of targets trained this session."""
@@ -405,7 +449,9 @@ class _RunMonitor(object):
         eta(rate * remaining)
 
     def _show(self, seed: int, current: Optional[str]) -> None:
-        table = _blotter(seed, self.targets, self.done[seed], current, None, self.reference, compact=True)
+        table = _blotter(
+            seed, self.targets, self.done[seed], current, None, self.reference, compact=True, times=self.seconds[seed]
+        )
         if len(self.config.seeds) > 1:
             board(
                 Group(table, _seed_matrix(self.targets, self.done, self.config.seeds, self.ensemble)),

@@ -304,12 +304,12 @@ R2 outputs are immutable: a script refuses to overwrite an existing location, so
 Every long-running job (fetch, label and feature builds, rolling training) opens a full-screen terminal dashboard. It has:
 - a header with clock, elapsed time and ETA;
 - nested progress bars;
-- live training metrics with ▲▼ changes and sparklines;
-- a timestamped event tape;
-- a job board: fetch stages with data-quality counts, build quality, or a target blotter with DONE/TRAIN/QUEUED and colour-coded test results;
+- live training metrics with ▲▼ changes and sparklines, including seconds per epoch;
+- a timestamped event tape, where each epoch line starts with its duration and shows how close early stopping is (`no gain 3/8`);
+- a job board: fetch stages with data-quality counts, build quality, or a target blotter with DONE/TRAIN/QUEUED, epochs run, time per target and colour-coded test results;
 - for multi-seed runs, a cross-seed table;
 - equity charts of cumulative daily rank IC and the long-short decile spread;
-- system load (CPU, RAM, GPU memory, disk);
+- system load (CPU, RAM, GPU memory in use / peak / held, and on NVIDIA GPUs utilisation, temperature and power; disk);
 - a scrolling results ticker.
 
 Keys while it runs:
