@@ -172,12 +172,18 @@ class OpenFigiTest(unittest.TestCase):
         self.assertEqual(result.loc["CCC", "share_class_figi"], FIGI["CCC"])
         self.assertEqual(result.loc["CCC", "name"], "US LINE")
 
-    def test_conflicting_us_share_class_figis_raise(self):
+    def test_conflicting_us_share_class_figis_are_excluded_not_fatal(self):
         conflict = figi_answer(FIGI["AAA"])
         conflict["data"].append(figi_answer(FIGI["BBB"])["data"][0])
-        opener = FakeOpener({"AAA": conflict})
-        with self.assertRaisesRegex(OpenFigiError, "several US share-class FIGIs"):
-            map_tickers(["AAA"], "key", opener=opener, sleep=lambda _: None)
+        opener = FakeOpener({"AAA": conflict, "CCC": figi_answer(FIGI["CCC"])})
+        result = map_tickers(
+            ["AAA", "CCC"], "key", opener=opener, sleep=lambda _: None
+        ).set_index("ticker")
+        self.assertTrue(pd.isna(result.loc["AAA", "share_class_figi"]))
+        self.assertTrue(result.loc["AAA", "mapping_note"].startswith("ambiguous"))
+        self.assertIn(FIGI["AAA"], result.loc["AAA", "mapping_note"])
+        self.assertIn(FIGI["BBB"], result.loc["AAA", "mapping_note"])
+        self.assertEqual(result.loc["CCC", "share_class_figi"], FIGI["CCC"])
 
 
 # ---------------------------------------------------------------- Alpaca
@@ -440,6 +446,7 @@ class UniverseTest(unittest.TestCase):
                 "symbols": 11,
                 "mapped": 10,
                 "unmapped": 1,
+                "ambiguous_figi": 0,
                 "excluded_by_type": 6,
                 "common_stocks": 4,
             },

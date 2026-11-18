@@ -106,11 +106,13 @@ def _row(ticker: str, result: Any) -> Dict[str, Optional[str]]:
         row["mapping_note"] = "warning: no US composite share-class FIGI"
         return row
     if len(figis) > 1:
-        raise OpenFigiError(
-            "ticker {} maps to several US share-class FIGIs: {}".format(
-                ticker, ",".join(figis)
-            )
+        # One ticker, several US share classes (e.g. a reorganized issuer reusing
+        # its ticker). Without dates we cannot tell which applies when, so the
+        # ticker is excluded and counted rather than guessed or fatal.
+        row["mapping_note"] = "ambiguous: several US share-class FIGIs: {}".format(
+            ",".join(figis)
         )
+        return row
     chosen = next(item for item in candidates if item.get("shareClassFIGI") == figis[0])
     row["share_class_figi"] = figis[0]
     row["security_type2"] = chosen.get("securityType2")

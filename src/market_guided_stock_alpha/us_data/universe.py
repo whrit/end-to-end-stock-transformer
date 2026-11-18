@@ -120,6 +120,9 @@ def build_securities(
         "symbols": int(len(unique_assets)),
         "mapped": int(mapped.sum()),
         "unmapped": int((~mapped).sum()),
+        "ambiguous_figi": int(
+            merged["mapping_note"].fillna("").str.startswith("ambiguous").sum()
+        ),
         "excluded_by_type": int((mapped & ~common).sum()),
         "common_stocks": int(common.sum()),
     }
