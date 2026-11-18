@@ -129,12 +129,14 @@ def map_tickers(
     api_key: str,
     opener: Optional[Callable[..., Any]] = None,
     sleep: Callable[[float], Any] = time.sleep,
+    include_unlisted: bool = False,
 ) -> pd.DataFrame:
     """Map tickers to share-class FIGIs, one output row per input ticker.
 
     Batches 100 jobs per request, spaces requests to stay within 250 per minute,
     and backs off exponentially on HTTP 429. Unmapped tickers keep null fields
-    and explain why in ``mapping_note``.
+    and explain why in ``mapping_note``. ``include_unlisted`` also searches
+    delisted securities (acquired companies keep their last ticker there).
     """
     if not api_key:
         raise OpenFigiError("OpenFIGI API key is empty")
@@ -149,11 +151,14 @@ def map_tickers(
             sleep(interval)
         batch = tickers[start:start + MAX_JOBS_PER_REQUEST]
         jobs = [
-            {
-                "idType": "TICKER",
-                "idValue": openfigi_ticker(ticker),
-                "exchCode": OPENFIGI_EXCHANGE,
-            }
+            dict(
+                {
+                    "idType": "TICKER",
+                    "idValue": openfigi_ticker(ticker),
+                    "exchCode": OPENFIGI_EXCHANGE,
+                },
+                **({"includeUnlistedEquities": True} if include_unlisted else {})
+            )
             for ticker in batch
         ]
         results = _post(jobs, api_key, opener, sleep)

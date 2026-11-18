@@ -6,6 +6,7 @@ Security identifiers are explicit and never guessed. Accepted forms:
 
 - China A-shares and indices: `NNNNNN.SH`, `NNNNNN.SZ`, or `NNNNNN.BJ`.
 - US stocks: OpenFIGI share-class FIGI, `BBG` + 9 uppercase alphanumerics (for example `BBG001S5S399`). It stays the same across ticker changes.
+- US historical stocks with no verifiable FIGI (US v2 only): `<TICKER>.US.<YYYYMMDD>`, the company's last S&P 500 ticker and the date of its last bar (for example `SIVB.US.20230309`). Used for bankruptcies OpenFIGI no longer maps, tickers since reused by another company, and companies renamed after leaving the index.
 - US ETFs used as market state or benchmark: `<TICKER>.US` (for example `SPY.US`).
 
 ## Daily stock
@@ -78,9 +79,18 @@ US data is produced by `scripts/fetch_us_daily.py` from Alpaca (consolidated SIP
 | Calendar | Alpaca trading calendar; `is_open` for every calendar day |
 | Storage | `r2://<bucket>/us/v1/raw/*.parquet` (canonical tables + `securities.parquet` + `fetch_manifest.json`), `.../derived/` (artifacts and label), `.../runs/` |
 
-Known limits:
+**US v2: point-in-time S&P 500** (`fetch_us_daily.py --universe sp500`, `us/v2/`), which replaces both limits below for the S&P 500:
+- **Members.** On each trading day the members are the latest list in the [fja05680/sp500](https://github.com/fja05680/sp500) history (MIT) on or before that day, kept only on days the stock has a bar. Days after the history's last date reuse its last list, and the manifest counts them.
+- **Identity.** Each membership span is priced with Alpaca bars requested `asof` its last member day; that follows the company through later renames (FB → META) and never returns a later holder of the ticker. Spans with identical raw price histories are one company.
+- **FIGIs.** Companies still in the index on the last day map through their current ticker. A removed, delisted company gets its delisted FIGI only if no bar has been printed under its ticker since its last bar. A removed company that still trades keeps a FIGI only if its ticker still prices the same company. Everything else gets `<TICKER>.US.<YYYYMMDD>`. `securities.parquet` records the rule used (`identity`) and every S&P ticker of the company (`sp500_tickers`). REITs are included.
+- **Delistings.** `delistings.parquet` (`sec_code, last_trade_date, kind, exchange, delta, exit_factor`) lists every company whose bars stop before the last day. A delisting is a performance delisting if the last raw close is below $1 or the last close is below half the highest close of its final 20 sessions; otherwise it is a merger. `build_relative_excess_label.py --delistings` then labels anchors whose stock stops trading between t+1 and t+6 with the last adjusted close × `exit_factor` in place of the missing t+6 open. `exit_factor` is 1 for mergers and 1 − δ for performance delistings, with δ = 30% on NYSE/AMEX and 55% on Nasdaq or an unknown exchange (Shumway 1997; Shumway & Warther 1999).
+
+Known limits of US v1 (`--universe listed`):
 - **Survivorship bias.** Delisted stocks are included only if Alpaca still lists them as inactive assets and OpenFIGI maps their symbol. `fetch_manifest.json` records how many were mapped and how many were dropped. Alpaca does serve full daily bars for delisted tickers missing from its asset list, so the gap is the ticker list, not prices. See [the US Phase 2 plan](us_phase2_plan.md).
-- **No delisting returns.** A stock with no price at t+6 has no label for that anchor. See [the US Phase 2 plan](us_phase2_plan.md).
+- **No delisting returns.** A stock with no price at t+6 has no label for that anchor.
+- **No REITs.** OpenFIGI types REITs as `REIT`, not `Common Stock`.
+
+Known limits of both:
 - **Daily open is a close proxy for the official open (measured).**
   - Against the primary exchange's opening-auction print (condition `O` on the listing venue; 463 stock-days, 12 symbols, June 2021 and October 2026), Alpaca's daily `open` matches exactly 43% of the time.
   - Error: median absolute 0.8 bps, 95th percentile 33 bps, mean signed +1.8 bps. The offset appears at both label endpoints (t+1 and t+6), so it largely cancels in the ratio.

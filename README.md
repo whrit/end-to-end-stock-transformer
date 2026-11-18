@@ -299,7 +299,22 @@ uv run --env-file .env scripts/build_daily_features.py us_market63 --input $R/ra
 uv run --env-file .env scripts/run_rolling.py configs/us/stage1/master_d512_us_market63.json --resume
 ```
 
-R2 outputs are immutable: a script refuses to overwrite an existing location, so write each new data version to a new prefix (e.g. `us/v2`). The shipped US configs use the bucket `stock-transformer-data`; edit the `r2://` paths if your bucket has another name. The US profile currently covers Stage 1 (daily features). Remaining work (survivorship, delisting returns, US tuning, and the 390-bar intraday features) is planned in [docs/us_phase2_plan.md](docs/us_phase2_plan.md).
+R2 outputs are immutable: a script refuses to overwrite an existing location, so write each new data version to a new prefix. The shipped US configs use the bucket `stock-transformer-data`; edit the `r2://` paths if your bucket has another name.
+
+**US v2 (point-in-time S&P 500, recommended).** `--universe sp500` builds the universe from the historical S&P 500 member lists, including companies that were later removed, renamed or delisted, and writes `delistings.parquet`. Delisted stocks then exit at their last price in the label (less 30–55% for bankruptcies) instead of disappearing. The `us/v1` universe above contains only stocks that still exist today, which flatters every result. Details are in [the data contract](docs/data_contract.md#us-equities-profile).
+
+```bash
+R=r2://stock-transformer-data/us/v2
+uv run --env-file .env scripts/fetch_us_daily.py --universe sp500 --output $R/raw
+uv run --env-file .env scripts/build_relative_excess_label.py --stock-daily $R/raw/daily_stock.parquet \
+  --benchmark-daily $R/raw/daily_index_us_market63.parquet --calendar $R/raw/calendar.parquet \
+  --benchmark-code SPY.US --delistings $R/raw/delistings.parquet --output $R/derived/relative_excess_return_5d.pkl
+uv run --env-file .env scripts/build_daily_features.py alpha158 --input $R/raw/daily_stock.parquet \
+  --dtype float32 --membership $R/raw/membership.parquet --output $R/derived/alpha158
+uv run --env-file .env scripts/build_daily_features.py us_market63 --input $R/raw/daily_index_us_market63.parquet --output $R/derived/us_market63
+```
+
+The US profile covers Stage 1 (daily features). Remaining work (US tuning and the 390-bar intraday features) is planned in [docs/us_phase2_plan.md](docs/us_phase2_plan.md).
 
 Every long-running job (fetch, label and feature builds, rolling training) opens a full-screen terminal dashboard. It has:
 - a header with clock, elapsed time and ETA;

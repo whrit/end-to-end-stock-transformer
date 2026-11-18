@@ -103,6 +103,41 @@ class RelativeExcessLabelTest(unittest.TestCase):
                 )
                 self.assertNotIn((self.dates[0], "000001.SZ"), output.index)
 
+    def _delisting_stock(self):
+        # Trades days 1..3 (adjusted close 120 on day 3), then delists: no t+6 open.
+        return pd.DataFrame(
+            {
+                "trade_date": self.dates[1:4],
+                "sec_code": ["BUST.US.20240105"] * 3,
+                "adj_open": [110.0, 115.0, 118.0],
+                "close": [112.0, 116.0, 120.0],
+            }
+        )
+
+    def test_delisting_exits_at_last_close_times_exit_factor(self):
+        benchmark_gross = 206.0 / 201.0
+        for kind, factor in (("merger", 1.0), ("performance", 0.45)):
+            with self.subTest(kind=kind):
+                delistings = pd.DataFrame(
+                    {"sec_code": ["BUST.US.20240105"], "last_trade_date": [self.dates[3]],
+                     "kind": [kind], "exit_factor": [factor]}
+                )
+                output, diagnostics = build_relative_excess_label(
+                    self._delisting_stock(), self.benchmark, self.calendar, delistings=delistings
+                )
+                value = output.loc[(self.dates[0], "BUST.US.20240105"), DEFAULT_VALUE_COLUMN]
+                self.assertAlmostEqual(value, (120.0 * factor / 110.0) / benchmark_gross - 1.0)
+                # Anchors whose t+1 is after the last trade stay dropped.
+                self.assertNotIn((self.dates[3], "BUST.US.20240105"), output.index)
+                self.assertEqual(diagnostics["delisting_adjusted_by_kind"], {kind: 3})
+
+    def test_without_delistings_a_delisted_stock_has_no_label(self):
+        output, diagnostics = build_relative_excess_label(
+            self._delisting_stock(), self.benchmark, self.calendar
+        )
+        self.assertEqual(len(output), 0)
+        self.assertNotIn("delisting_adjusted_count", diagnostics)
+
     def test_missing_benchmark_t1_or_t6_omits_anchor(self):
         for missing_date in (self.dates[1], self.dates[6]):
             with self.subTest(missing_date=missing_date):

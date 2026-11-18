@@ -76,16 +76,19 @@ def build_from_files(
     manifest_path: Any,
     benchmark_code: str = DEFAULT_BENCHMARK_CODE,
     value_column: str = DEFAULT_VALUE_COLUMN,
+    delistings_path: Any = None,
 ) -> Dict[str, Any]:
     """Load canonical files, build one artifact, and publish its manifest.
 
-    Every location may be a local path or an ``r2://`` URI.
+    Every location may be a local path or an ``r2://`` URI. ``delistings_path``
+    (US v2 ``delistings.parquet``) adds delisting exits to the label.
     """
-    source_paths = {
-        _identity(stock_path),
-        _identity(benchmark_path),
-        _identity(calendar_path),
-    }
+    sources = [
+        ("stock_daily", stock_path),
+        ("benchmark_daily", benchmark_path),
+        ("calendar", calendar_path),
+    ] + ([("delistings", delistings_path)] if delistings_path is not None else [])
+    source_paths = {_identity(location) for _name, location in sources}
     if _identity(output_path) in source_paths:
         raise ValueError("Output path must not overwrite an input file")
     if _identity(manifest_path) in source_paths:
@@ -97,11 +100,7 @@ def build_from_files(
         cache = Path(directory)
         inputs = {
             name: (location, materialize(location, Path.cwd(), cache))
-            for name, location in (
-                ("stock_daily", stock_path),
-                ("benchmark_daily", benchmark_path),
-                ("calendar", calendar_path),
-            )
+            for name, location in sources
         }
         local_output = _staging(output_path, cache, "output")
         local_manifest = _staging(manifest_path, cache, "manifest")
@@ -116,6 +115,9 @@ def build_from_files(
             read_table(inputs["calendar"][1]),
             benchmark_code=benchmark_code,
             value_column=value_column,
+            delistings=(
+                read_table(inputs["delistings"][1]) if "delistings" in inputs else None
+            ),
         )
         output_sha256 = atomic_write_pickle(output, local_output)
         values = output[value_column].to_numpy(dtype="float64")
@@ -192,6 +194,11 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--manifest")
     parser.add_argument("--benchmark-code", default=DEFAULT_BENCHMARK_CODE)
     parser.add_argument("--value-column", default=DEFAULT_VALUE_COLUMN)
+    parser.add_argument(
+        "--delistings", default=None,
+        help="US v2 delistings.parquet: delisted stocks exit at their last close "
+        "x exit_factor instead of losing the label",
+    )
     args = parser.parse_args(argv)
     if PurePosixPath(args.output).suffix.lower() not in (".pkl", ".pickle"):
         parser.error("--output must use .pkl or .pickle")
@@ -210,6 +217,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         args.manifest,
         benchmark_code=args.benchmark_code,
         value_column=args.value_column,
+        delistings_path=args.delistings,
     )
     output = manifest["output"]
     quality = {

@@ -119,10 +119,15 @@ def fetch_daily_bars(
     adjustment: str,
     chunk_size: int = BAR_SYMBOL_CHUNK,
     now: Optional[pd.Timestamp] = None,
+    asof: Optional[Any] = None,
+    quiet: bool = False,
 ) -> pd.DataFrame:
     """Daily SIP bars for ``symbols`` between New York dates ``start``..``end``.
 
-    ``adjustment`` is ``"raw"`` or ``"all"``.
+    ``adjustment`` is ``"raw"`` or ``"all"``. ``asof`` (a date) reads each
+    symbol as it was on that date and follows that company through later
+    ticker changes; ``"-"`` returns every bar printed under the literal symbol
+    by any holder; ``None`` uses Alpaca's default.
     """
     from alpaca.data.enums import Adjustment, DataFeed
     from alpaca.data.requests import StockBarsRequest
@@ -140,9 +145,14 @@ def fetch_daily_bars(
     unique = sorted(set(str(symbol).upper() for symbol in symbols))
     pieces = []
     bar = progress(
-        total=len(unique), desc="Alpaca daily bars ({})".format(adjustment), unit="symbol"
+        total=len(unique), desc="Alpaca daily bars ({})".format(adjustment), unit="symbol",
+        leave=not quiet,
     )
     for offset in range(0, len(unique), chunk_size):
+        if asof is None:
+            extra = {}
+        else:
+            extra = {"asof": "-" if asof == "-" else str(pd.Timestamp(asof).date())}
         result = data_client.get_stock_bars(
             StockBarsRequest(
                 symbol_or_symbols=unique[offset:offset + chunk_size],
@@ -151,6 +161,7 @@ def fetch_daily_bars(
                 end=request_end.to_pydatetime(),
                 adjustment=Adjustment(adjustment),
                 feed=DataFeed.SIP,
+                **extra
             )
         )
         pieces.append(bars_frame_to_table(result.df))

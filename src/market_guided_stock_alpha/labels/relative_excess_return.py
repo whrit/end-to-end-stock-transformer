@@ -5,7 +5,7 @@ schemas, command-line parsing, and training are deliberately outside its
 scope.
 """
 
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -142,6 +142,38 @@ def _benchmark_prices(
     return frame.loc[valid, ["trade_date", "open"]].reset_index(drop=True)
 
 
+def _delisting_exits(stock_daily: pd.DataFrame, delistings: pd.DataFrame) -> pd.DataFrame:
+    """sec_code, last_trade_date, kind, exit_price (last adjusted close x exit_factor)."""
+    required = {"sec_code", "last_trade_date", "kind", "exit_factor"}
+    if not required.issubset(delistings.columns):
+        raise ValueError("delistings require sec_code, last_trade_date, kind, exit_factor")
+    if "close" not in stock_daily.columns:
+        raise ValueError("delisting exits need the adjusted close column in stock_daily")
+    exits = delistings.loc[:, ["sec_code", "last_trade_date", "kind", "exit_factor"]].copy()
+    exits["last_trade_date"] = _normalized_dates(exits["last_trade_date"], "delisting last_trade_date").to_numpy()
+    if exits["sec_code"].duplicated().any():
+        raise ValueError("delistings list a security more than once")
+    factor = pd.to_numeric(exits["exit_factor"], errors="coerce")
+    if not (np.isfinite(factor) & (factor > 0) & (factor <= 1)).all():
+        raise ValueError("delisting exit_factor must be in (0, 1]")
+    closes = stock_daily.loc[:, ["trade_date", "sec_code", "close"]].copy()
+    closes["trade_date"] = _normalized_dates(closes["trade_date"], "stock trade_date").to_numpy()
+    exits = exits.merge(
+        closes.rename(columns={"trade_date": "last_trade_date", "close": "last_close"}),
+        on=["sec_code", "last_trade_date"],
+        how="left",
+        validate="one_to_one",
+    )
+    if exits["last_close"].isna().any():
+        raise ValueError(
+            "no close on the last trade date for {}".format(
+                ",".join(exits.loc[exits["last_close"].isna(), "sec_code"].head(5))
+            )
+        )
+    exits["exit_price"] = exits["last_close"].astype("float64") * factor.astype("float64")
+    return exits.drop(columns=["last_close", "exit_factor"])
+
+
 def validate_output(
     output: pd.DataFrame, calendar: pd.DataFrame, value_column: str
 ) -> None:
@@ -176,8 +208,15 @@ def build_relative_excess_label(
     calendar: pd.DataFrame,
     benchmark_code: str = DEFAULT_BENCHMARK_CODE,
     value_column: str = DEFAULT_VALUE_COLUMN,
+    delistings: Optional[pd.DataFrame] = None,
 ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
-    """Build the finalized t+1-to-t+6 relative-excess label artifact."""
+    """Build the finalized t+1-to-t+6 relative-excess label artifact.
+
+    ``delistings`` (``sec_code, last_trade_date, kind, exit_factor``) adds the
+    anchors whose stock stops trading between t+1 and t+6: the missing t+6 open
+    becomes the last adjusted close times ``exit_factor`` (1 for mergers,
+    1 - delta for performance delistings). Without it nothing changes.
+    """
     if not isinstance(value_column, str) or not value_column.strip():
         raise ValueError("value_column must be a non-empty string")
     mapping = build_calendar_mapping(calendar)
@@ -254,6 +293,37 @@ def build_relative_excess_label(
     finite = np.isfinite(values.to_numpy(dtype="float64"))
     result = stock_pair.loc[finite, ["trade_date", "sec_code"]].copy()
     result[value_column] = values.loc[finite].to_numpy(dtype="float64")
+    delisting_counts = None
+    if delistings is not None:
+        exits = _delisting_exits(stock_daily, delistings)
+        affected = stock_t1.merge(exits, on="sec_code", how="inner", sort=False)
+        affected = affected.loc[
+            (affected["label_date_t1"] <= affected["last_trade_date"])
+            & (affected["last_trade_date"] < affected["label_date_t6"])
+        ].merge(
+            benchmark_pair.loc[:, ["trade_date", "benchmark_gross"]],
+            on="trade_date",
+            how="inner",
+            validate="many_to_one",
+            sort=False,
+        )
+        exit_values = (
+            affected["exit_price"] / affected["stock_adj_open_t1"]
+        ) / affected["benchmark_gross"] - 1.0
+        keep = np.isfinite(exit_values.to_numpy(dtype="float64"))
+        added = affected.loc[keep, ["trade_date", "sec_code"]].copy()
+        added[value_column] = exit_values.loc[keep].to_numpy(dtype="float64")
+        if len(added.merge(result, on=["trade_date", "sec_code"])):
+            raise ValueError("delisting exit overlaps an anchor that has a t+6 open")
+        result = pd.concat([result, added], ignore_index=True)
+        delisting_counts = {
+            "delisting_adjusted_count": int(len(added)),
+            "delisting_adjusted_by_kind": {
+                str(kind): int(count)
+                for kind, count in affected.loc[keep, "kind"].value_counts().sort_index().items()
+            },
+            "delistings_supplied": int(len(exits)),
+        }
     output = result.set_index(["trade_date", "sec_code"])[
         [value_column]
     ].sort_index()
@@ -270,4 +340,6 @@ def build_relative_excess_label(
         ),
         "formula": formula_metadata(benchmark_code, value_column),
     }
+    if delisting_counts is not None:
+        diagnostics.update(delisting_counts)
     return output, diagnostics

@@ -27,6 +27,8 @@ So the survivorship gap is a **missing ticker list**, not missing prices. Fixing
 
 ## Gap A: Survivorship bias
 
+**Status: done for the S&P 500 as US v2 (2026-11-18).** Instead of an all-stocks ticker history (Polygon/FMP/EDGAR), v2 uses the point-in-time S&P 500 membership from fja05680/sp500, which is free and needs no key. See `us_data/sp500.py` and the US section of `docs/data_contract.md`. Measured on 2016-01 → 2026-08: 745 S&P tickers, 181 of them absent from v1 (renames, delistings, REITs). OpenFIGI's current-ticker mapping is wrong for reused tickers (FB now maps to a ProShares ETF), so identity comes from Alpaca bars `asof` the membership date. The plan below is kept for an all-stocks universe.
+
 **Problem.** `fetch_us_daily.py` builds its universe from Alpaca's asset list. That list holds today's securities plus a few inactive ones, so most stocks that were delisted between 2016 and today never enter the universe. Backtests then only see survivors, which inflates IC and top-k returns.
 
 **Plan.**
@@ -55,6 +57,8 @@ So the survivorship gap is a **missing ticker list**, not missing prices. Fixing
 ---
 
 ## Gap B: Delisting returns
+
+**Status: done in US v2.** `delistings.parquet` plus `build_relative_excess_label.py --delistings` (Shumway δ). Smoke check: SIVB's anchors from 2 to 8 March 2023 now label −72% to −83% instead of being dropped.
 
 **Problem.** The label needs `adj_open[t+6]`. When a stock delists between t+1 and t+6 there is no price, so the anchor is dropped. Collapses like SIVB in March 2023 vanish from the loss and the metrics, while stocks still in membership get rewarded.
 
@@ -95,7 +99,7 @@ So the survivorship gap is a **missing ticker list**, not missing prices. Fixing
 **Protocol** (no peeking at the test period):
 1. **Pilot first.** Run one seed of `master_d512_us_market63`. Record wall time per target and validation rank IC. That timing sets the sweep budget. **Done (2026-11-18, RTX 4080):** 8 targets in 2 h 08 min, 10–29 min per target. Test rank IC +0.0357, IC +0.0386, top10 +0.0010. The best validation epoch was 1–3 in 4 of 8 targets.
 2. **Tuning period = 2019–2022 targets only.** Use a separate config with `test_start: 2019-01-01, test_end: 2022-12-31`. The 2023+ test period is evaluated **once**, after choices are frozen.
-3. **Sweep.** One seed each, in stages; `scripts/sweep.py make` writes the configs and `scripts/sweep.py compare` ranks the finished runs on out-of-sample rank IC over the tuning window. **Stage A is ready:** `configs/us/secondary/tune_us_d{128,256,512}_lr{1e-05,3e-05,0.0001}.json`, 9 configs with β 10, MSE, dropout 0.5. Later stages are generated from the stage A winner:
+3. **Sweep.** One seed each, in stages; `scripts/sweep.py make` writes the configs and `scripts/sweep.py compare` ranks the finished runs on out-of-sample rank IC over the tuning window. **Stage A is ready, pointed at US v2** (`r2://…/us/v2/`): `configs/us/secondary/tune_us_d{128,256,512}_lr{1e-05,3e-05,0.0001}.json`, 9 configs with β 10, MSE, dropout 0.5. Later stages are generated from the stage A winner:
 
    | Knob | Values |
    |---|---|

@@ -299,7 +299,22 @@ uv run --env-file .env scripts/build_daily_features.py us_market63 --input $R/ra
 uv run --env-file .env scripts/run_rolling.py configs/us/stage1/master_d512_us_market63.json --resume
 ```
 
-R2 输出不可覆盖：脚本拒绝写入已存在的位置，因此每个新数据版本请使用新的前缀（例如 `us/v2`）。自带的美股配置使用名为 `stock-transformer-data` 的 bucket；若你的 bucket 名不同，请修改其中的 `r2://` 路径。美股流程目前覆盖 Stage 1（日频特征），其余工作（幸存者偏差、退市收益、美股调参、390 根分钟线特征）见 [docs/us_phase2_plan.md](docs/us_phase2_plan.md)。
+R2 输出不可覆盖：脚本拒绝写入已存在的位置，因此每个新数据版本请使用新的前缀。自带的美股配置使用名为 `stock-transformer-data` 的 bucket；若你的 bucket 名不同，请修改其中的 `r2://` 路径。
+
+**美股 v2（时点 S&P 500，推荐）。** `--universe sp500` 根据历史 S&P 500 成分名单构建股票池，包括后来被剔除、更名或退市的公司，并生成 `delistings.parquet`。这样退市股票在标签中按最后价格退出（破产类再扣除 30–55%），而不是直接消失。上面的 `us/v1` 股票池只包含如今仍存在的股票，会让所有结果偏好。详见[数据契约](docs/data_contract.md#us-equities-profile)。
+
+```bash
+R=r2://stock-transformer-data/us/v2
+uv run --env-file .env scripts/fetch_us_daily.py --universe sp500 --output $R/raw
+uv run --env-file .env scripts/build_relative_excess_label.py --stock-daily $R/raw/daily_stock.parquet \
+  --benchmark-daily $R/raw/daily_index_us_market63.parquet --calendar $R/raw/calendar.parquet \
+  --benchmark-code SPY.US --delistings $R/raw/delistings.parquet --output $R/derived/relative_excess_return_5d.pkl
+uv run --env-file .env scripts/build_daily_features.py alpha158 --input $R/raw/daily_stock.parquet \
+  --dtype float32 --membership $R/raw/membership.parquet --output $R/derived/alpha158
+uv run --env-file .env scripts/build_daily_features.py us_market63 --input $R/raw/daily_index_us_market63.parquet --output $R/derived/us_market63
+```
+
+美股流程目前覆盖 Stage 1（日频特征），其余工作（美股调参、390 根分钟线特征）见 [docs/us_phase2_plan.md](docs/us_phase2_plan.md)。
 
 ### 终端仪表盘
 

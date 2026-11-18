@@ -1,7 +1,7 @@
 """Pure pandas assembly of the canonical US raw tables from Alpaca and OpenFIGI frames."""
 
 import math
-from typing import Dict, Iterable, Sequence, Tuple
+from typing import Dict, Iterable, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -297,8 +297,13 @@ def build_us_tables(
     end: object,
     min_price: float = DEFAULT_MIN_PRICE,
     min_dollar_volume: float = DEFAULT_MIN_DOLLAR_VOLUME,
+    membership: Optional[pd.DataFrame] = None,
 ) -> Dict[str, pd.DataFrame]:
-    """Assemble and validate every canonical raw table keyed by ``TABLE_FILES``."""
+    """Assemble and validate every canonical raw table keyed by ``TABLE_FILES``.
+
+    ``membership`` replaces the price/dollar-volume filter (the point-in-time
+    S&P 500 universe); it is kept only on days the stock has a bar.
+    """
     start = pd.Timestamp(start).normalize()
     end = pd.Timestamp(end).normalize()
     if start > end:
@@ -310,13 +315,17 @@ def build_us_tables(
     bars = merge_adjusted_and_raw(adjusted_bars, raw_bars)
     _require_open_days(bars, open_days)
     daily_stock = build_daily_stock(bars, securities)
+    if membership is None:
+        members = build_membership(daily_stock, open_days, min_price, min_dollar_volume)
+    else:
+        members = validate_membership(
+            membership.merge(daily_stock.loc[:, ["trade_date", "sec_code"]], on=["trade_date", "sec_code"])
+        )
     return {
         "daily_stock": daily_stock,
         "daily_index_us_market63": build_daily_index(bars, MARKET63_ETFS, open_days),
         "daily_index_us_market84": build_daily_index(bars, MARKET84_ETFS, open_days),
-        "membership": build_membership(
-            daily_stock, open_days, min_price, min_dollar_volume
-        ),
+        "membership": members,
         "calendar": calendar,
         "securities": securities.loc[:, list(SECURITIES_COLUMNS)].reset_index(drop=True),
     }

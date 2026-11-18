@@ -1,6 +1,11 @@
 #!/usr/bin/env -S uv run
 """Fetch US daily equities from Alpaca, map identities through OpenFIGI, and
-write the canonical raw tables plus fetch_manifest.json to a local dir or R2."""
+write the canonical raw tables plus fetch_manifest.json to a local dir or R2.
+
+``--universe listed`` (v1): today's listed common stocks, filtered by price and
+dollar volume. ``--universe sp500`` (v2): point-in-time S&P 500 members since
+``--start``, including removed and delisted companies, plus delistings.parquet
+for the label's delisting exits (see us_data/sp500.py)."""
 
 import argparse
 import datetime as dt
@@ -39,6 +44,16 @@ from market_guided_stock_alpha.us_data.universe import (
     build_securities,
     build_us_tables,
 )
+from market_guided_stock_alpha.us_data.sp500 import (
+    PERFORMANCE_DRAWDOWN,
+    PERFORMANCE_DRAWDOWN_SESSIONS,
+    PERFORMANCE_MAX_RAW_CLOSE,
+    SHUMWAY_DELTA_NASDAQ,
+    SHUMWAY_DELTA_NYSE_AMEX,
+    SP500_HISTORY_URL,
+    build_sp500_universe,
+    load_history,
+)
 
 
 DEFAULT_OUTPUT = "r2://stock-transformer-data/us/v1/raw"
@@ -75,6 +90,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Comma-separated Alpaca symbols to keep (e.g. AAPL,MSFT) for smoke runs; "
         "default: the whole listed universe.",
     )
+    parser.add_argument(
+        "--universe", choices=("listed", "sp500"), default="listed",
+        help="listed: today's listed common stocks (v1); sp500: point-in-time "
+        "S&P 500 members including removed and delisted companies (v2).",
+    )
+    parser.add_argument(
+        "--sp500-history", default=SP500_HISTORY_URL,
+        help="fja05680/sp500 'Historical Components & Changes (Updated)' CSV (URL or path).",
+    )
     return parser
 
 
@@ -83,12 +107,13 @@ def _write_tables(
 ) -> None:
     directory.mkdir(parents=True)
     files = {}
-    for name, filename in TABLE_FILES.items():
+    for name, frame in tables.items():
+        filename = TABLE_FILES.get(name, "{}.parquet".format(name))
         path = directory / filename
-        tables[name].to_parquet(path, index=False)
+        frame.to_parquet(path, index=False)
         files[name] = {
             "file": filename,
-            "rows": int(len(tables[name])),
+            "rows": int(len(frame)),
             "sha256": sha256_path(path),
         }
     manifest["tables"] = files
@@ -163,32 +188,82 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     _stage(1, "listing Alpaca assets")
     assets = list_assets(trading)
-    if wanted is not None:
-        missing = sorted(wanted.difference(assets["alpaca_symbol"]))
-        if missing:
-            raise SystemExit("error: unknown Alpaca symbols: {}".format(",".join(missing)))
-        assets = assets.loc[assets["alpaca_symbol"].isin(wanted)].reset_index(drop=True)
-    _stage(2, "mapping {:,} tickers through OpenFIGI".format(assets["alpaca_symbol"].nunique()))
-    figi = map_tickers(sorted(set(assets["alpaca_symbol"])), secrets["OPENFIGI_API_KEY"])
-    securities, counts = build_securities(assets, figi)
-    QUALITY.update(
-        {
-            "tickers seen": counts.get("symbols", 0),
-            "mapped to FIGI": counts.get("mapped", 0),
-            "unmapped": counts.get("unmapped", 0),
-            "ambiguous FIGI (excluded)": counts.get("ambiguous_figi", 0),
-            "excluded: not common stock": counts.get("excluded_by_type", 0),
-            "common stocks": counts.get("common_stocks", 0),
-        }
-    )
-    symbols = sorted(set(securities["alpaca_symbol"]) | set(MARKET84_ETFS))
-    _stage(3, "fetching daily bars for {:,} symbols (adjusted, then raw)".format(len(symbols)))
-    adjusted = fetch_daily_bars(data, symbols, start, end, "all")
-    raw = fetch_daily_bars(data, symbols, start, end, "raw")
+    sp500_source: Optional[Dict[str, Any]] = None
+    if args.universe == "sp500":
+        _stage(2, "building the point-in-time S&P 500 universe")
+        history, history_sha256 = load_history(args.sp500_history)
+        if wanted is not None:
+            history = history.assign(tickers=[tuple(t for t in ts if t in wanted) for ts in history["tickers"]])
+        trading_days = fetch_trading_days(trading, start, end)
+        universe = build_sp500_universe(
+            history,
+            [day for day in trading_days if start <= day <= end],
+            lambda symbols, asof, adjustment: fetch_daily_bars(
+                data, symbols, start, end, adjustment, asof="-" if asof is None else asof, quiet=True
+            ),
+            lambda tickers, unlisted: map_tickers(
+                tickers, secrets["OPENFIGI_API_KEY"], include_unlisted=unlisted
+            ),
+            assets,
+        )
+        counts = dict(universe["counts"])
+        identity = counts.get("identity", {})
+        QUALITY.update(
+            {
+                "S&P episodes": counts["episodes"],
+                "companies": counts["companies"],
+                "renamed (several tickers)": counts["companies_with_several_tickers"],
+                "episodes without bars": counts["episodes_without_bars"],
+                "FIGI (current/verified/delisted)": "{}/{}/{}".format(
+                    identity.get("figi_current", 0), identity.get("figi_verified", 0), identity.get("figi_delisted", 0)
+                ),
+                "TICKER.US.YYYYMMDD codes": sum(v for k, v in identity.items() if k.startswith("fallback")),
+                "delisted: merger / performance": "{} / {}".format(
+                    counts["delisted_merger"], counts["delisted_performance"]
+                ),
+                "days after S&P history": counts["trading_days_after_history"],
+            }
+        )
+        sp500_source = {"location": str(args.sp500_history), "sha256": history_sha256}
+        _stage(3, "fetching ETF bars (adjusted, raw)")
+        adjusted = pd.concat(
+            [universe["adjusted"], fetch_daily_bars(data, MARKET84_ETFS, start, end, "all")], ignore_index=True
+        )
+        raw = pd.concat(
+            [universe["raw"], fetch_daily_bars(data, MARKET84_ETFS, start, end, "raw")], ignore_index=True
+        )
+        securities = universe["securities"]
+        # Stock bars are already keyed by sec_code (in alpaca_symbol).
+        key = pd.DataFrame({"sec_code": securities["sec_code"], "alpaca_symbol": securities["sec_code"]})
+        for column in ("ticker", "name", "status", "exchange", "security_type2"):
+            key[column] = None
+    else:
+        if wanted is not None:
+            missing = sorted(wanted.difference(assets["alpaca_symbol"]))
+            if missing:
+                raise SystemExit("error: unknown Alpaca symbols: {}".format(",".join(missing)))
+            assets = assets.loc[assets["alpaca_symbol"].isin(wanted)].reset_index(drop=True)
+        _stage(2, "mapping {:,} tickers through OpenFIGI".format(assets["alpaca_symbol"].nunique()))
+        figi = map_tickers(sorted(set(assets["alpaca_symbol"])), secrets["OPENFIGI_API_KEY"])
+        securities, counts = build_securities(assets, figi)
+        key = securities
+        QUALITY.update(
+            {
+                "tickers seen": counts.get("symbols", 0),
+                "mapped to FIGI": counts.get("mapped", 0),
+                "unmapped": counts.get("unmapped", 0),
+                "ambiguous FIGI (excluded)": counts.get("ambiguous_figi", 0),
+                "excluded: not common stock": counts.get("excluded_by_type", 0),
+                "common stocks": counts.get("common_stocks", 0),
+            }
+        )
+        symbols = sorted(set(securities["alpaca_symbol"]) | set(MARKET84_ETFS))
+        _stage(3, "fetching daily bars for {:,} symbols (adjusted, then raw)".format(len(symbols)))
+        adjusted = fetch_daily_bars(data, symbols, start, end, "all")
+        raw = fetch_daily_bars(data, symbols, start, end, "raw")
     QUALITY.update(
         {
             "symbols with bars": int(adjusted["alpaca_symbol"].nunique()),
-            "symbols without bars": len(symbols) - int(adjusted["alpaca_symbol"].nunique()),
             "bar rows": len(adjusted),
         }
     )
@@ -196,9 +271,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     trading_days = fetch_trading_days(trading, start, end)
     _stage(5, "building canonical tables")
     tables = build_us_tables(
-        securities, adjusted, raw, trading_days, start, end,
+        key, adjusted, raw, trading_days, start, end,
         min_price=args.min_price, min_dollar_volume=args.min_dollar_volume,
+        membership=universe["membership"] if args.universe == "sp500" else None,
     )
+    if args.universe == "sp500":
+        tables["securities"] = securities
+        tables["delistings"] = universe["delistings"]
     stock = tables["daily_stock"]
     numeric = stock.select_dtypes("number")
     QUALITY.update(
@@ -225,14 +304,31 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "end": str(end.date()),
         "requested_end": str(requested_end.date()),
         "symbols": None if wanted is None else sorted(wanted),
-        "filters": {
-            "exchanges": list(US_EXCHANGES),
-            "security_type2": COMMON_STOCK_TYPE,
-            "market_sector": EQUITY_SECTOR,
-            "min_price": args.min_price,
-            "min_dollar_volume": args.min_dollar_volume,
-            "dollar_volume_window_trading_days": DOLLAR_VOLUME_WINDOW,
-        },
+        "universe": args.universe,
+        "filters": (
+            {
+                "exchanges": list(US_EXCHANGES),
+                "security_type2": COMMON_STOCK_TYPE,
+                "market_sector": EQUITY_SECTOR,
+                "min_price": args.min_price,
+                "min_dollar_volume": args.min_dollar_volume,
+                "dollar_volume_window_trading_days": DOLLAR_VOLUME_WINDOW,
+            }
+            if args.universe == "listed"
+            else {
+                "membership": "point-in-time S&P 500 member and traded that day",
+                "sp500_history": sp500_source,
+                "delisting_policy": {
+                    "merger_exit": "last adjusted close",
+                    "performance_exit": "last adjusted close x (1 - delta)",
+                    "delta_nyse_amex": SHUMWAY_DELTA_NYSE_AMEX,
+                    "delta_nasdaq_or_unknown": SHUMWAY_DELTA_NASDAQ,
+                    "performance_if_last_raw_close_below": PERFORMANCE_MAX_RAW_CLOSE,
+                    "performance_if_last_close_below_fraction_of_max": PERFORMANCE_DRAWDOWN,
+                    "drawdown_sessions": PERFORMANCE_DRAWDOWN_SESSIONS,
+                },
+            }
+        ),
         "etfs": {"us_market63": list(MARKET63_ETFS), "us_market84": list(MARKET84_ETFS)},
         "benchmark": BENCHMARK_CODE,
         "counts": counts,
