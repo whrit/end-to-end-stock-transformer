@@ -234,6 +234,24 @@ class TrainingAndCheckpointTest(unittest.TestCase):
                 )
                 self.assertTrue(np.isfinite(output["train_loss"]))
 
+    def test_non_finite_training_loss_still_fails_naming_its_date(self):
+        layout = FeatureLayout.stage1()
+        config = TrainingConfig(
+            epochs=1,
+            loss="mse",
+            early_stopping=EarlyStoppingConfig(enabled=False, patience=1, minimum_epochs=1),
+        )
+        dataset = TinyDataset(layout, 3)
+        bad = dataset.values[1]
+        bad.labels[:] = 3e38  # finite labels whose squared error overflows to inf
+        model = GRURegressor.from_layout(layout, hidden_dim=8, num_layers=1, dropout=0.0)
+        trainer = Trainer(model, config, device="cpu")
+        with self.assertRaisesRegex(
+            FloatingPointError,
+            "date {} has insufficient or non-finite training loss".format(bad.prediction_date.date()),
+        ):
+            trainer.train_epoch(WholeDateLoader(dataset), epoch=1)
+
 
 class CountingDataset(TinyDataset):
     def __init__(self, layout, count):

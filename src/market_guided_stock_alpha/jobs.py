@@ -6,17 +6,18 @@ there. The laptop side is ``scripts/remote.py``.
 
 Layout under the jobs root (``r2://bucket/jobs`` or a local directory)::
 
-    <job>/job.json       request, written last by submit (its presence = queued)
+    <job>/job.json       request, written last by submit (its presence = queued;
+                         "exclusive": true = run alone, e.g. LightGBM's ~45 GB RAM)
     <job>/code.tar.gz    working-tree snapshot (tracked + untracked, not ignored)
     <job>/config.json    experiment config
     <job>/claim.json     created atomically by the agent that takes the job
     <job>/state.json     running / done / failed / stopped / cancelled
     <job>/job.log        full stdout+stderr of the job (uploaded every 30 s)
     <job>/control.json   {"stop": true} = finish current target, save, exit
-    _agents/<name>.json  agent heartbeat (GPU, state, current job)
+    _agents/<name>.json  agent heartbeat (GPU, state, current jobs)
     _agent/jobs.py       this file, as fetched by the instance start command
 
-Run the agent on an instance:  python jobs.py agent --root r2://bucket/jobs
+Run the agent on an instance:  python jobs.py agent --root r2://bucket/jobs [--slots 3]
 """
 
 import argparse
@@ -46,6 +47,9 @@ POLL_SECONDS = 15.0
 LOG_UPLOAD_SECONDS = 30.0
 HEARTBEAT_SECONDS = 60.0
 FINAL_STATES = ("done", "failed", "stopped", "cancelled")
+# Jobs one agent runs side by side. A training step is CPU/launch-bound and uses
+# ~2-4 GB of GPU memory, so a single job leaves the GPU mostly idle.
+DEFAULT_SLOTS = 3
 
 
 def now_iso() -> str:
@@ -208,16 +212,31 @@ def job_command(job: Dict[str, Any]) -> List[str]:
 
 
 class Agent(object):
-    """Claims queued jobs one at a time and runs them; never touches the instance."""
+    """Claims queued jobs and runs up to ``slots`` at once; never touches the instance."""
 
-    def __init__(self, store: JobStore, name: str, workdir: Path, once: bool = False) -> None:
+    def __init__(self, store: JobStore, name: str, workdir: Path, once: bool = False, slots: int = DEFAULT_SLOTS) -> None:
+        if slots < 1:
+            raise ValueError("slots must be at least 1")
         self.store = store
         self.name = name
         self.workdir = workdir
         self.once = once
+        self.slots = slots
         self.gpu = gpu_name()
-        self.state = "idle"
-        self.job: Optional[str] = None
+        self.lock = threading.Lock()
+        self.running: Dict[str, Dict[str, Any]] = {}
+        self.threads: List[threading.Thread] = []
+        self.claimed = False
+
+    @property
+    def state(self) -> str:
+        with self.lock:
+            return "running" if self.running else "idle"
+
+    @property
+    def job(self) -> Optional[str]:
+        with self.lock:
+            return ", ".join(sorted(self.running)) or None
 
     def heartbeat(self) -> None:
         self.store.put_json(
@@ -228,6 +247,7 @@ class Agent(object):
                 "host": socket.gethostname(),
                 "state": self.state,
                 "job": self.job,
+                "slots": self.slots,
                 "updated_at": now_iso(),
             },
         )
@@ -245,28 +265,48 @@ class Agent(object):
         # or an older agent they fill the instance disk, so start from an empty workdir.
         shutil.rmtree(str(self.workdir), ignore_errors=True)
         threading.Thread(target=self._heartbeat_loop, daemon=True).start()
-        print("agent {} on {} watching {}".format(self.name, self.gpu, self.store.root), flush=True)
+        print("agent {} on {} watching {} ({} slots)".format(self.name, self.gpu, self.store.root, self.slots), flush=True)
         while True:
-            ran = False
-            try:
-                ran = self.poll_once()
-            except Exception as error:
-                print("poll failed: {}".format(error), file=sys.stderr, flush=True)
-            if ran and self.once:
+            self.threads = [thread for thread in self.threads if thread.is_alive()]
+            if self.once and self.claimed and not self.threads:
                 return
-            if not ran:
+            claimed = False
+            if self._has_room():
+                try:
+                    claimed = self.poll_once(self._spawn)
+                except Exception as error:
+                    print("poll failed: {}".format(error), file=sys.stderr, flush=True)
+            if not claimed:  # claimed: look again at once to fill the next free slot
                 time.sleep(POLL_SECONDS)
 
-    def poll_once(self) -> bool:
+    def _has_room(self) -> bool:
+        with self.lock:
+            exclusive = any(job.get("exclusive") for job in self.running.values())
+        return len(self.threads) < self.slots and not exclusive and not (self.once and self.claimed)
+
+    def _spawn(self, job_id: str, job: Dict[str, Any]) -> None:
+        thread = threading.Thread(target=self.run_job, args=(job_id, job), name=job_id, daemon=True)
+        thread.start()
+        self.threads.append(thread)
+
+    def poll_once(self, run: Any = None) -> bool:
+        """Claim the first claimable job and hand it to ``run`` (default: run it here)."""
+        with self.lock:
+            busy = bool(self.running)
         for job_id in self.store.children():
             if job_id.startswith("_") or self.store.get_text("{}/claim.json".format(job_id)) is not None:
                 continue
             job = self.store.get_json("{}/job.json".format(job_id))
             if job is None:
                 continue  # submit still uploading
+            if job.get("exclusive") and busy:
+                continue  # needs the machine to itself; later jobs may still fit a free slot
             claim = {"agent": self.name, "gpu": self.gpu, "claimed_at": now_iso()}
             if self.store.put_json("{}/claim.json".format(job_id), claim, exclusive=True):
-                self.run_job(job_id, job)
+                with self.lock:
+                    self.running[job_id] = job
+                self.claimed = True
+                (run or self.run_job)(job_id, job)
                 return True
         return False
 
@@ -276,7 +316,8 @@ class Agent(object):
         self.store.put_json("{}/state.json".format(job_id), document)
 
     def run_job(self, job_id: str, job: Dict[str, Any]) -> None:
-        self.state, self.job = "running", job_id
+        with self.lock:
+            self.running[job_id] = job
         self.heartbeat()
         root = self.workdir / job_id
         log_path = root / "job.log"
@@ -333,7 +374,8 @@ class Agent(object):
                 print("job {} {} (exit {})".format(job_id, state, exit_code), flush=True)
             finally:
                 shutil.rmtree(str(root), ignore_errors=True)  # results are on R2; free the disk
-                self.state, self.job = "idle", None
+                with self.lock:
+                    self.running.pop(job_id, None)
                 self.heartbeat()
 
     @staticmethod
@@ -362,10 +404,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     agent.add_argument("--name", default=os.environ.get("MGSA_AGENT") or socket.gethostname())
     agent.add_argument("--workdir", type=Path, default=Path.home() / "mgsa_jobs")
     agent.add_argument("--once", action="store_true", help="exit after one job (testing)")
+    agent.add_argument("--slots", type=int, default=DEFAULT_SLOTS, help="jobs to run at once (default {})".format(DEFAULT_SLOTS))
     args = parser.parse_args(argv)
     if not args.root:
         parser.error("--root or MGSA_JOBS is required")
-    Agent(JobStore(args.root), args.name, args.workdir, args.once).run_forever()
+    Agent(JobStore(args.root), args.name, args.workdir, args.once, args.slots).run_forever()
     return 0
 
 

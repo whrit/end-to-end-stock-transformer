@@ -22,6 +22,22 @@ from market_guided_stock_alpha.training.metrics import (
 from market_guided_stock_alpha.training.seed import resolve_device, seed_everything
 
 
+def _loss_error(prediction_date: Any) -> str:
+    return "date {} has insufficient or non-finite training loss".format(prediction_date.date())
+
+
+def _raise_first_non_finite(checks: List[torch.Tensor], dates: List[Any]) -> None:
+    """Raise for the first step whose loss or gradients were non-finite (one device sync)."""
+    if not checks:
+        return
+    flags = torch.stack(checks).cpu().tolist()
+    for (loss_finite, gradients_finite), prediction_date in zip(flags, dates):
+        if not loss_finite:
+            raise FloatingPointError(_loss_error(prediction_date))
+        if not gradients_finite:
+            raise FloatingPointError("non-finite model gradient")
+
+
 class Trainer:
     """One optimizer step per complete prediction-date cross-section."""
 
@@ -41,7 +57,7 @@ class Trainer:
         self.loss_function = build_loss(config.loss)
         self.checkpoints = checkpoint_manager
 
-    def _loss(self, predictions: torch.Tensor, batch: DateBatch) -> Mapping[str, Any]:
+    def _loss(self, predictions: torch.Tensor, batch: DateBatch, check_finite: bool = True) -> Mapping[str, Any]:
         result = self.loss_function(
             predictions,
             batch.labels,
@@ -52,13 +68,9 @@ class Trainer:
         if (
             int(result.get("valid_count", 0)) < self.config.minimum_valid_labels
             or loss is None
-            or not bool(torch.isfinite(loss))
+            or (check_finite and not bool(torch.isfinite(loss)))
         ):
-            raise FloatingPointError(
-                "date {} has insufficient or non-finite training loss".format(
-                    batch.prediction_date.date()
-                )
-            )
+            raise FloatingPointError(_loss_error(batch.prediction_date))
         return result
 
     def train_epoch(self, loader: Any, epoch: int) -> Dict[str, Any]:
@@ -66,29 +78,42 @@ class Trainer:
             loader.set_epoch(epoch)
         self.model.train()
         rows: List[Dict[str, Any]] = []
+        # Device-side per date: loss, loss finite, gradients finite. Reading them back
+        # every step would make the CPU wait for backward and the optimizer step each
+        # time; checked once at epoch end instead (before validation, so no checkpoint
+        # is ever saved from a non-finite step), with the same error and date.
+        losses: List[torch.Tensor] = []
+        checks: List[torch.Tensor] = []
+        dates: List[Any] = []
         for cpu_batch in progress(
             loader, desc="epoch {} train".format(epoch), unit="date", leave=False
         ):
             batch = move_date_batch(cpu_batch, self.device)
             self.optimizer.zero_grad(set_to_none=True)
             predictions = forward_date_batch(self.model, batch)
-            result = self._loss(predictions, batch)
+            try:
+                result = self._loss(predictions, batch, check_finite=False)
+            except FloatingPointError:
+                _raise_first_non_finite(checks, dates)  # an earlier bad step explains this one
+                raise
             loss = result["loss"]
             loss.backward()
             gradients = [parameter.grad for parameter in self.model.parameters() if parameter.grad is not None]
-            # One device sync for all parameters instead of one per parameter.
-            if gradients and not bool(torch.stack([torch.isfinite(g).all() for g in gradients]).all()):
-                raise FloatingPointError("non-finite model gradient")
+            gradients_finite = (
+                torch.stack([torch.isfinite(g).all() for g in gradients]).all()
+                if gradients else torch.ones((), dtype=torch.bool, device=loss.device)
+            )
+            checks.append(torch.stack((torch.isfinite(loss.detach()), gradients_finite)))
+            losses.append(loss.detach())
+            dates.append(batch.prediction_date)
             torch.nn.utils.clip_grad_value_(
                 self.model.parameters(), self.config.optimizer.gradient_clip_value
             )
             self.optimizer.step()
-            rows.append(
-                {
-                    "loss": float(loss.detach().cpu()),
-                    "valid_count": int(result["valid_count"]),
-                }
-            )
+            rows.append({"valid_count": int(result["valid_count"])})
+        _raise_first_non_finite(checks, dates)
+        for row, value in zip(rows, torch.stack(losses).cpu().tolist() if losses else []):
+            row["loss"] = float(value)
         if not rows:
             raise RuntimeError("training loader is empty")
         total = sum(row["valid_count"] for row in rows)

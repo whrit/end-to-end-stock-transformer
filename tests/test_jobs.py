@@ -1,4 +1,5 @@
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -40,6 +41,41 @@ class JobQueueTest(unittest.TestCase):
             self.assertEqual(store.get_json("j1/state.json")["state"], "failed")
             self.assertFalse((Path(directory) / "work" / "j1").exists())
             self.assertEqual((agent.state, agent.job), ("idle", None))
+
+    def test_slots_run_jobs_side_by_side_and_exclusive_jobs_run_alone(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = jobs.JobStore(directory)
+            store.put_json("j1/job.json", {"id": "j1"})
+            store.put_json("j2/job.json", {"id": "j2", "exclusive": True})
+            store.put_json("j3/job.json", {"id": "j3"})
+            with mock.patch.object(jobs, "gpu_name", return_value="test GPU"):
+                agent = jobs.Agent(store, "a", Path(directory) / "work", slots=2)
+            release = threading.Event()
+
+            def fake_run(job_id, job):
+                release.wait(10)
+                with agent.lock:
+                    agent.running.pop(job_id)
+
+            agent.run_job = fake_run
+
+            def fill():
+                claimed = []
+                while agent._has_room() and agent.poll_once(agent._spawn):
+                    claimed.append(agent.threads[-1].name)
+                return claimed
+
+            # j2 needs the machine to itself, so the second slot goes to j3.
+            self.assertEqual(fill(), ["j1", "j3"])
+            self.assertEqual(agent.job, "j1, j3")
+            release.set()
+            for thread in agent.threads:
+                thread.join(10)
+            agent.threads = [thread for thread in agent.threads if thread.is_alive()]
+            release.clear()
+            self.assertEqual(fill(), ["j2"])  # alone: the free slot stays empty
+            self.assertFalse(agent._has_room())
+            release.set()
 
 
 if __name__ == "__main__":

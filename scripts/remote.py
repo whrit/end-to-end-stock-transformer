@@ -202,6 +202,8 @@ def cmd_submit(args: argparse.Namespace) -> int:
         "run_location": run_location,
         "status_location": run_location + "/dashboard_status.json",
         "code": code,
+        # LightGBM assembles the whole training matrix in RAM (~45 GB): never beside other jobs.
+        "exclusive": (config.get("model") or {}).get("family") == "lightgbm",
         "submitted_at": jobs.now_iso(),
         "submitted_from": socket.gethostname(),
     }
