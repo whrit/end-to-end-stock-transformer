@@ -21,6 +21,9 @@ GPU_RESERVE_MIN = 6 * GIB  # d_model 512 peaks near 3.3 GB at 2,500 stocks per d
 RAM_RESERVE_FRACTION = 0.15  # of the (container) memory limit
 RAM_RESERVE_MIN = 8 * GIB
 MAX_CACHE_WORKERS = 16
+# Jobs sharing this GPU (set by the jobs.py agent). Each fills its cache at the
+# same time, so free memory alone over-promises: cap the cache to its share.
+GPU_JOBS_ENV = "MGSA_GPU_JOBS"
 
 
 def _raw_label_device(target: torch.device) -> torch.device:
@@ -171,12 +174,15 @@ def ram_cache_budget() -> int:
 
 
 def gpu_cache_budget(device: torch.device) -> int:
-    """Bytes of GPU memory the epoch cache may use, leaving room for training."""
+    """Bytes of GPU memory the epoch cache may use, leaving room for training,
+    within this job's share of the GPU when ``MGSA_GPU_JOBS`` jobs share it."""
     if device.type != "cuda":
         return 0
     free, total = torch.cuda.mem_get_info(device)
     free += torch.cuda.memory_reserved(device) - torch.cuda.memory_allocated(device)
-    return max(0, int(free) - max(GPU_RESERVE_MIN, int(GPU_RESERVE_FRACTION * total)))
+    share = total // max(1, int(os.environ.get(GPU_JOBS_ENV, "1")))
+    available = min(int(free), share - torch.cuda.memory_allocated(device))
+    return max(0, available - max(GPU_RESERVE_MIN, int(GPU_RESERVE_FRACTION * share)))
 
 
 def usable_cpu_count() -> int:

@@ -338,6 +338,9 @@ class Agent(object):
             environment = dict(os.environ)
             environment["MGSA_CONTROL"] = self.store.location("{}/control.json".format(job_id))
             environment["PYTHONUNBUFFERED"] = "1"
+            # Jobs share the GPU: each caps its epoch cache to its share (modeling/transport.py).
+            environment["MGSA_GPU_JOBS"] = "1" if job.get("exclusive") else str(self.slots)
+            environment.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
             command = job_command(job)
             with open(str(log_path), "ab") as log:
                 versions = self._environment_report(root, environment, log)

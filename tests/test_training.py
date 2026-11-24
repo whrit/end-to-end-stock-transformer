@@ -279,6 +279,21 @@ class EpochCacheTest(unittest.TestCase):
                     self.assertTrue(torch.equal(got.labels_raw, want.labels_raw))
         return cached_data.reads
 
+    def test_gpu_cache_stays_within_this_jobs_share_of_a_shared_gpu(self):
+        from market_guided_stock_alpha.modeling import transport
+
+        gib = transport.GIB
+        device = torch.device("cuda")
+        with mock.patch.object(torch.cuda, "mem_get_info", return_value=(14 * gib, 16 * gib)), \
+                mock.patch.object(torch.cuda, "memory_reserved", return_value=0), \
+                mock.patch.object(torch.cuda, "memory_allocated", return_value=0):
+            with mock.patch.dict("os.environ", {transport.GPU_JOBS_ENV: "1"}):
+                self.assertEqual(transport.gpu_cache_budget(device), 8 * gib)  # 14 free - 6 reserve
+            with mock.patch.dict("os.environ", {transport.GPU_JOBS_ENV: "2"}):
+                self.assertEqual(transport.gpu_cache_budget(device), 2 * gib)  # 8 share - 6 reserve
+            with mock.patch.dict("os.environ", {transport.GPU_JOBS_ENV: "3"}):
+                self.assertEqual(transport.gpu_cache_budget(device), 0)  # share below the reserve
+
     def test_cache_builds_each_date_once_and_keeps_batches_and_order(self):
         self.assertEqual(self._epochs(1 << 40), 5)
 
