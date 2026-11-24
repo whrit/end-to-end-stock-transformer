@@ -42,6 +42,41 @@ class JobQueueTest(unittest.TestCase):
             self.assertFalse((Path(directory) / "work" / "j1").exists())
             self.assertEqual((agent.state, agent.job), ("idle", None))
 
+    def test_r2_blip_during_a_job_neither_fails_nor_orphans_it(self):
+        import sys
+
+        with tempfile.TemporaryDirectory() as directory:
+            store = jobs.JobStore(directory)
+            store.put_json("j1/job.json", {"id": "j1"})
+            store.put_text("j1/config.json", "{}")
+            work = Path(directory) / "work"
+            (work / "src").mkdir(parents=True)
+            import tarfile
+            with tarfile.open(str(Path(directory) / "j1" / "code.tar.gz"), "w:gz") as archive:
+                archive.add(str(work / "src"), arcname="src")
+            script = "import os, time; print('TMPDIR=' + os.environ['TMPDIR'], flush=True); time.sleep(1.5)"
+            real_put_file, calls = store.put_file, []
+
+            def flaky_put_file(relative, path):
+                calls.append(relative)
+                if len(calls) <= 2:
+                    raise ConnectionError("Could not connect to the endpoint URL")
+                real_put_file(relative, path)
+
+            store.put_file = flaky_put_file
+            with mock.patch.object(jobs, "gpu_name", return_value="test GPU"):
+                agent = jobs.Agent(store, "a", work)
+            with mock.patch.object(jobs.Agent, "heartbeat"), \
+                    mock.patch.object(jobs.Agent, "_environment_report", return_value=None), \
+                    mock.patch.object(jobs, "job_command", return_value=[sys.executable, "-c", script]), \
+                    mock.patch.object(jobs, "LOG_UPLOAD_SECONDS", 0.0), \
+                    mock.patch.object(jobs, "RETRY_SECONDS", 0.0):
+                agent.run_job("j1", {"id": "j1"})
+            self.assertGreaterEqual(len(calls), 3)  # uploads kept going after the failures
+            self.assertEqual(store.get_json("j1/state.json")["state"], "done")
+            self.assertIn("TMPDIR={}".format(work / "j1" / "tmp"), store.get_text("j1/job.log"))
+            self.assertFalse((work / "j1").exists())
+
     def test_slots_run_jobs_side_by_side_and_exclusive_jobs_run_alone(self):
         with tempfile.TemporaryDirectory() as directory:
             store = jobs.JobStore(directory)

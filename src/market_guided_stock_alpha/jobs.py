@@ -52,6 +52,20 @@ FINAL_STATES = ("done", "failed", "stopped", "cancelled")
 DEFAULT_SLOTS = 3
 
 
+RETRY_ATTEMPTS = 10  # final log and state writes ride out ~5 minutes without R2
+RETRY_SECONDS = 30.0
+
+
+def _retry(call: Any, *args: Any, **kwargs: Any) -> Any:
+    for attempt in range(RETRY_ATTEMPTS):
+        try:
+            return call(*args, **kwargs)
+        except Exception:
+            if attempt == RETRY_ATTEMPTS - 1:
+                raise
+            time.sleep(RETRY_SECONDS)
+
+
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -323,6 +337,7 @@ class Agent(object):
         log_path = root / "job.log"
         started = now_iso()
         exit_code = None
+        process: Optional[subprocess.Popen] = None
         versions: Optional[Dict[str, Any]] = None
         try:
             self._state(job_id, "running", started_at=started)
@@ -338,6 +353,9 @@ class Agent(object):
             environment = dict(os.environ)
             environment["MGSA_CONTROL"] = self.store.location("{}/control.json".format(job_id))
             environment["PYTHONUNBUFFERED"] = "1"
+            # Downloaded inputs (tens of GB) live under the job folder, so deleting it frees them.
+            (root / "tmp").mkdir()
+            environment["TMPDIR"] = str(root / "tmp")
             # Jobs share the GPU: each caps its epoch cache to its share (modeling/transport.py).
             environment["MGSA_GPU_JOBS"] = "1" if job.get("exclusive") else str(self.slots)
             environment.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
@@ -352,9 +370,12 @@ class Agent(object):
                 while process.poll() is None:
                     time.sleep(2)
                     if time.monotonic() - last_upload >= LOG_UPLOAD_SECONDS:
-                        log.flush()
-                        self.store.put_file("{}/job.log".format(job_id), log_path)
                         last_upload = time.monotonic()
+                        log.flush()
+                        try:
+                            self.store.put_file("{}/job.log".format(job_id), log_path)
+                        except Exception as error:  # a network blip must not abandon the job
+                            print("job {} log upload failed: {}".format(job_id, error), file=sys.stderr, flush=True)
                 exit_code = process.returncode
         except Exception as error:
             # The local disk may be the problem (full), so the error goes to the queue too.
@@ -366,12 +387,15 @@ class Agent(object):
                 self.store.put_text("{}/agent_error.txt".format(job_id), "agent error: {}\n".format(error))
         finally:
             try:
+                if process is not None and process.poll() is None:
+                    process.kill()  # never leave an untracked job holding the GPU and disk
+                    process.wait()
                 if log_path.exists():
-                    self.store.put_file("{}/job.log".format(job_id), log_path)
+                    _retry(self.store.put_file, "{}/job.log".format(job_id), log_path)
                 # Exit codes from progress.run_main: 0 done, 3 stopped (resumable), else failed.
                 state = {0: "done", 3: "stopped"}.get(exit_code, "failed")
-                self._state(
-                    job_id, state, started_at=started, ended_at=now_iso(), exit_code=exit_code,
+                _retry(
+                    self._state, job_id, state, started_at=started, ended_at=now_iso(), exit_code=exit_code,
                     environment=versions,
                 )
                 print("job {} {} (exit {})".format(job_id, state, exit_code), flush=True)

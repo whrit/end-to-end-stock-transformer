@@ -948,7 +948,7 @@ def _check_control() -> None:
                 text = storage.materialize(location, Path.cwd(), Path(directory), quiet=True).read_text(encoding="utf-8")
         else:
             text = Path(location).read_text(encoding="utf-8")
-    except (FileNotFoundError, OSError):
+    except Exception:  # missing file or a network blip: check again next interval
         return
     try:
         requested = bool(json.loads(text).get("stop"))
