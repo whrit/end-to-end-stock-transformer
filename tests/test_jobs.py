@@ -83,7 +83,8 @@ class JobQueueTest(unittest.TestCase):
             store.put_json("j1/job.json", {"id": "j1"})
             store.put_json("j2/job.json", {"id": "j2", "exclusive": True})
             store.put_json("j3/job.json", {"id": "j3"})
-            with mock.patch.object(jobs, "gpu_name", return_value="test GPU"):
+            with mock.patch.object(jobs, "gpu_name", return_value="test GPU"), \
+                    mock.patch.object(jobs, "gpu_count", return_value=1):
                 agent = jobs.Agent(store, "a", Path(directory) / "work", slots=2)
             release = threading.Event()
 
@@ -91,6 +92,7 @@ class JobQueueTest(unittest.TestCase):
                 release.wait(10)
                 with agent.lock:
                     agent.running.pop(job_id)
+                    agent.devices.pop(job_id)
 
             agent.run_job = fake_run
 
@@ -111,6 +113,24 @@ class JobQueueTest(unittest.TestCase):
             self.assertEqual(fill(), ["j2"])  # alone: the free slot stays empty
             self.assertFalse(agent._has_room())
             release.set()
+
+    def test_jobs_spread_over_gpus_and_reuse_the_freed_one(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = jobs.JobStore(directory)
+            for name in ("j1", "j2", "j3", "j4", "j5"):
+                store.put_json("{}/job.json".format(name), {"id": name})
+            with mock.patch.object(jobs, "gpu_name", return_value="2× test GPU"), \
+                    mock.patch.object(jobs, "gpu_count", return_value=2):
+                agent = jobs.Agent(store, "a", Path(directory) / "work", slots=2)
+            for _ in range(4):
+                self.assertTrue(agent.poll_once(lambda job_id, job: agent.threads.append(job_id)))
+            self.assertEqual(agent.devices, {"j1": 0, "j2": 1, "j3": 0, "j4": 1})
+            self.assertFalse(agent._has_room())  # 2 slots x 2 GPUs
+            agent.threads.remove("j2")
+            del agent.devices["j2"]
+            agent.running.pop("j2")
+            self.assertTrue(agent.poll_once(lambda job_id, job: agent.threads.append(job_id)))
+            self.assertEqual(agent.devices["j5"], 1)  # the GPU j2 left
 
 
 if __name__ == "__main__":

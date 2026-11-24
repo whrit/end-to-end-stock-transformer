@@ -213,6 +213,18 @@ def gpu_name() -> str:
     return "{}× {}".format(len(lines), lines[0]) if len(lines) > 1 else lines[0]
 
 
+def gpu_count() -> int:
+    """NVIDIA GPUs on this machine (1 when there are none, so CPU agents still run jobs)."""
+    try:
+        output = subprocess.run(
+            ["nvidia-smi", "--query-gpu=index", "--format=csv,noheader"],
+            capture_output=True, text=True, timeout=10, check=False,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        output = ""
+    return max(1, len([line for line in output.splitlines() if line.strip()]))
+
+
 def job_command(job: Dict[str, Any]) -> List[str]:
     command = [
         "uv", "run", "--frozen", "--all-extras", "scripts/run_rolling.py", "job_config.json",
@@ -226,7 +238,8 @@ def job_command(job: Dict[str, Any]) -> List[str]:
 
 
 class Agent(object):
-    """Claims queued jobs and runs up to ``slots`` at once; never touches the instance."""
+    """Claims queued jobs and runs up to ``slots`` per GPU at once, each pinned to
+    the least-busy GPU; never touches the instance."""
 
     def __init__(self, store: JobStore, name: str, workdir: Path, once: bool = False, slots: int = DEFAULT_SLOTS) -> None:
         if slots < 1:
@@ -237,10 +250,19 @@ class Agent(object):
         self.once = once
         self.slots = slots
         self.gpu = gpu_name()
+        self.gpus = gpu_count()
         self.lock = threading.Lock()
         self.running: Dict[str, Dict[str, Any]] = {}
+        self.devices: Dict[str, int] = {}  # job -> GPU index it is pinned to
         self.threads: List[threading.Thread] = []
         self.claimed = False
+
+    def _least_busy_gpu(self) -> int:
+        """Call with ``self.lock`` held."""
+        load = [0] * self.gpus
+        for index in self.devices.values():
+            load[index] += 1
+        return load.index(min(load))
 
     @property
     def state(self) -> str:
@@ -262,6 +284,7 @@ class Agent(object):
                 "state": self.state,
                 "job": self.job,
                 "slots": self.slots,
+                "gpus": self.gpus,
                 "updated_at": now_iso(),
             },
         )
@@ -279,7 +302,7 @@ class Agent(object):
         # or an older agent they fill the instance disk, so start from an empty workdir.
         shutil.rmtree(str(self.workdir), ignore_errors=True)
         threading.Thread(target=self._heartbeat_loop, daemon=True).start()
-        print("agent {} on {} watching {} ({} slots)".format(self.name, self.gpu, self.store.root, self.slots), flush=True)
+        print("agent {} on {} watching {} ({} slots per GPU)".format(self.name, self.gpu, self.store.root, self.slots), flush=True)
         while True:
             self.threads = [thread for thread in self.threads if thread.is_alive()]
             if self.once and self.claimed and not self.threads:
@@ -296,7 +319,7 @@ class Agent(object):
     def _has_room(self) -> bool:
         with self.lock:
             exclusive = any(job.get("exclusive") for job in self.running.values())
-        return len(self.threads) < self.slots and not exclusive and not (self.once and self.claimed)
+        return len(self.threads) < self.slots * self.gpus and not exclusive and not (self.once and self.claimed)
 
     def _spawn(self, job_id: str, job: Dict[str, Any]) -> None:
         thread = threading.Thread(target=self.run_job, args=(job_id, job), name=job_id, daemon=True)
@@ -319,6 +342,7 @@ class Agent(object):
             if self.store.put_json("{}/claim.json".format(job_id), claim, exclusive=True):
                 with self.lock:
                     self.running[job_id] = job
+                    self.devices[job_id] = self._least_busy_gpu()
                 self.claimed = True
                 (run or self.run_job)(job_id, job)
                 return True
@@ -332,6 +356,9 @@ class Agent(object):
     def run_job(self, job_id: str, job: Dict[str, Any]) -> None:
         with self.lock:
             self.running[job_id] = job
+            if job_id not in self.devices:
+                self.devices[job_id] = self._least_busy_gpu()
+            device = self.devices[job_id]
         self.heartbeat()
         root = self.workdir / job_id
         log_path = root / "job.log"
@@ -356,13 +383,14 @@ class Agent(object):
             # Downloaded inputs (tens of GB) live under the job folder, so deleting it frees them.
             (root / "tmp").mkdir()
             environment["TMPDIR"] = str(root / "tmp")
-            # Jobs share the GPU: each caps its epoch cache to its share (modeling/transport.py).
+            # Pinned to one GPU; jobs sharing it cap their epoch cache to their share (modeling/transport.py).
+            environment["CUDA_VISIBLE_DEVICES"] = str(device)
             environment["MGSA_GPU_JOBS"] = "1" if job.get("exclusive") else str(self.slots)
             environment.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
             command = job_command(job)
             with open(str(log_path), "ab") as log:
                 versions = self._environment_report(root, environment, log)
-                self._state(job_id, "running", started_at=started, environment=versions)
+                self._state(job_id, "running", started_at=started, environment=versions, gpu_index=device)
                 log.write("$ {}\n".format(" ".join(command)).encode("utf-8"))
                 log.flush()
                 process = subprocess.Popen(command, cwd=str(root), stdout=log, stderr=subprocess.STDOUT, env=environment)
@@ -403,6 +431,7 @@ class Agent(object):
                 shutil.rmtree(str(root), ignore_errors=True)  # results are on R2; free the disk
                 with self.lock:
                     self.running.pop(job_id, None)
+                    self.devices.pop(job_id, None)
                 self.heartbeat()
 
     @staticmethod
@@ -431,7 +460,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     agent.add_argument("--name", default=os.environ.get("MGSA_AGENT") or socket.gethostname())
     agent.add_argument("--workdir", type=Path, default=Path.home() / "mgsa_jobs")
     agent.add_argument("--once", action="store_true", help="exit after one job (testing)")
-    agent.add_argument("--slots", type=int, default=DEFAULT_SLOTS, help="jobs to run at once (default {})".format(DEFAULT_SLOTS))
+    agent.add_argument("--slots", type=int, default=DEFAULT_SLOTS, help="jobs per GPU (default {})".format(DEFAULT_SLOTS))
     args = parser.parse_args(argv)
     if not args.root:
         parser.error("--root or MGSA_JOBS is required")
