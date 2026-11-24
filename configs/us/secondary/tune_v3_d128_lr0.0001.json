@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "experiment_name": "tune_v3_d128_lr0.0001",
+  "research_position": "secondary",
+  "universe": "dynamic_us_common_stocks",
+  "label_contract": {"name": "spy_relative_excess_return_t1_t6", "benchmark": "SPY.US", "holding_period_trading_days": 5, "dependency_offset_trading_days": 6},
+  "feature_layout": "us_stage1_market63",
+  "model": {"family": "master", "d_model": 128, "temporal_heads": 4, "spatial_heads": 2, "dropout": 0.5, "beta": 10.0, "ablation": "none"},
+  "training": {"epochs": 40, "optimizer": {"learning_rate": 0.0001, "weight_decay": 0.0, "gradient_clip_value": 3.0}, "loss": {"name": "mse"}, "early_stopping": {"enabled": true, "patience": 8, "minimum_epochs": 10}, "minimum_valid_labels": 2, "checkpoint_every": 1, "primary_metric": "mean_rank_ic"},
+  "rolling": {"frequency": "semiannual", "train_start": "2001-01-01", "test_start": "2012-01-01", "test_end": "2022-12-31"},
+  "initialization": "warm",
+  "seeds": [42],
+  "data": {"calendar": "r2://stock-transformer-data/us/v3/raw/calendar.parquet", "membership": "r2://stock-transformer-data/us/v3/raw/membership.parquet", "label": "r2://stock-transformer-data/us/v3/derived/relative_excess_return_5d.pkl", "label_manifest": "r2://stock-transformer-data/us/v3/derived/relative_excess_return_5d.manifest.json", "label_column": "relative_excess_return_5d", "alpha158": "r2://stock-transformer-data/us/v3/derived/alpha158", "market": "r2://stock-transformer-data/us/v3/derived/us_market63"},
+  "output_root": "r2://stock-transformer-data/us/v3/runs"
+}
