@@ -154,8 +154,8 @@ def _delisting_exits(stock_daily: pd.DataFrame, delistings: pd.DataFrame) -> pd.
     if exits["sec_code"].duplicated().any():
         raise ValueError("delistings list a security more than once")
     factor = pd.to_numeric(exits["exit_factor"], errors="coerce")
-    if not (np.isfinite(factor) & (factor > 0) & (factor <= 1)).all():
-        raise ValueError("delisting exit_factor must be in (0, 1]")
+    if not (np.isfinite(factor) & (factor >= 0)).all():
+        raise ValueError("delisting exit_factor must be finite and non-negative")
     closes = stock_daily.loc[:, ["trade_date", "sec_code", "close"]].copy()
     closes["trade_date"] = _normalized_dates(closes["trade_date"], "stock trade_date").to_numpy()
     exits = exits.merge(
@@ -214,8 +214,9 @@ def build_relative_excess_label(
 
     ``delistings`` (``sec_code, last_trade_date, kind, exit_factor``) adds the
     anchors whose stock stops trading between t+1 and t+6: the missing t+6 open
-    becomes the last adjusted close times ``exit_factor`` (1 for mergers,
-    1 - delta for performance delistings). Without it nothing changes.
+    becomes the last adjusted close times ``exit_factor`` (v2: 1 for mergers,
+    1 - delta for performance delistings; v3: 1 + CRSP's delisting return, so
+    above 1 for a takeover premium and 0 for a total loss). Without it nothing changes.
     """
     if not isinstance(value_column, str) or not value_column.strip():
         raise ValueError("value_column must be a non-empty string")

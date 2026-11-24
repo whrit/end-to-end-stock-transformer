@@ -1,11 +1,15 @@
 """Pure pandas assembly of the canonical US raw tables from Alpaca and OpenFIGI frames."""
 
 import math
-from typing import Dict, Iterable, Optional, Sequence, Tuple
+import os
+import tempfile
+from pathlib import Path
+from typing import Any, Dict, Iterable, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
 
+from market_guided_stock_alpha.artifacts import atomic_write_json, sha256_path
 from market_guided_stock_alpha.data.contracts import (
     DataQualityError,
     normalize_security_code,
@@ -14,6 +18,7 @@ from market_guided_stock_alpha.data.contracts import (
     validate_daily_stock,
     validate_membership,
 )
+from market_guided_stock_alpha.storage import is_remote, publish
 from market_guided_stock_alpha.us_data.openfigi import openfigi_ticker
 
 
@@ -55,6 +60,7 @@ TABLE_FILES = {
     "calendar": "calendar.parquet",
     "securities": "securities.parquet",
 }
+MANIFEST_NAME = "fetch_manifest.json"
 _BAR_KEYS = ["alpaca_symbol", "trade_date"]
 _BAR_VALUES = ("open", "high", "low", "close", "volume", "vwap")
 
@@ -329,3 +335,34 @@ def build_us_tables(
         "calendar": calendar,
         "securities": securities.loc[:, list(SECURITIES_COLUMNS)].reset_index(drop=True),
     }
+
+
+def _write_tables(tables: Mapping[str, pd.DataFrame], manifest: Dict[str, Any], directory: Path) -> None:
+    directory.mkdir(parents=True)
+    files = {}
+    for name, frame in tables.items():
+        filename = TABLE_FILES.get(name, "{}.parquet".format(name))
+        path = directory / filename
+        frame.to_parquet(path, index=False)
+        files[name] = {"file": filename, "rows": int(len(frame)), "sha256": sha256_path(path)}
+    manifest["tables"] = files
+    atomic_write_json(directory / MANIFEST_NAME, manifest)
+
+
+def write_raw_tables(
+    tables: Mapping[str, pd.DataFrame], manifest: Dict[str, Any], output: str, client: Any = None
+) -> None:
+    """Write the tables plus ``MANIFEST_NAME`` to a new local directory (atomic
+    rename) or publish them to an ``r2://`` location."""
+    if is_remote(output):
+        with tempfile.TemporaryDirectory() as workdir:
+            staged = Path(workdir) / "raw"
+            _write_tables(tables, manifest, staged)
+            publish(staged, output, client=client)
+        return
+    local = Path(output)
+    local.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=str(local.parent)) as workdir:
+        staged = Path(workdir) / "raw"
+        _write_tables(tables, manifest, staged)
+        os.replace(str(staged), str(local))

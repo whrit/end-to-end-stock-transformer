@@ -314,6 +314,12 @@ uv run --env-file .env scripts/build_daily_features.py alpha158 --input $R/raw/d
 uv run --env-file .env scripts/build_daily_features.py us_market63 --input $R/raw/daily_index_us_market63.parquet --output $R/derived/us_market63
 ```
 
+**US v3 (CRSP, top 1,500 by market cap, 2000–2025).** Needs a WRDS account with CRSP (licensed data: keep it private). Export the CIZ *Stock – Version 2* daily stock file for 2000-01-01 → 2025-12-31 from the WRDS website. `import_crsp.py` turns it into the same tables: each day the 1,500 largest US common stocks above $5, keyed by PERMNO (`NNNNN.CRSP`), with total-return-adjusted prices and CRSP's own delisting returns in `delistings.parquet`. Then run the label and feature builds above with `R=r2://stock-transformer-data/us/v3`.
+
+```bash
+uv run --env-file .env scripts/import_crsp.py --input <WRDS export>.zip --output r2://stock-transformer-data/us/v3/raw
+```
+
 The US profile covers Stage 1 (daily features). Remaining work (US tuning and the 390-bar intraday features) is planned in [docs/us_phase2_plan.md](docs/us_phase2_plan.md).
 
 Every long-running job (fetch, label and feature builds, rolling training) opens a full-screen terminal dashboard. It has:

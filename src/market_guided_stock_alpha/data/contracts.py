@@ -31,8 +31,9 @@ MEMBERSHIP_COLUMNS = ("trade_date", "sec_code")
 CALENDAR_COLUMNS = ("calendar_date", "is_open")
 # BBG… = share-class FIGI (stocks); TICKER.US = ETFs; TICKER.US.YYYYMMDD = a
 # historical stock with no verifiable FIGI, named by its last ticker and the
-# date of its last bar (e.g. SIVB.US.20230309, a bankruptcy that moved to OTC).
-US_SECURITY_CODE_PATTERN = r"BBG[0-9A-Z]{9}|[A-Z][A-Z0-9]{0,5}(\.[A-Z])?\.US(\.\d{8})?"
+# date of its last bar (e.g. SIVB.US.20230309, a bankruptcy that moved to OTC);
+# NNNNN.CRSP = a CRSP PERMNO (US v3, never reused).
+US_SECURITY_CODE_PATTERN = r"BBG[0-9A-Z]{9}|[A-Z][A-Z0-9]{0,5}(\.[A-Z])?\.US(\.\d{8})?|\d{5}\.CRSP"
 US_SECURITY_CODE = re.compile(r"^({})$".format(US_SECURITY_CODE_PATTERN))
 _SECURITY_CODE = re.compile(
     r"^(\d{{6}}\.(SH|SZ|BJ)|{})$".format(US_SECURITY_CODE_PATTERN)

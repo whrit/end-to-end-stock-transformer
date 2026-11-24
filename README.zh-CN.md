@@ -314,6 +314,12 @@ uv run --env-file .env scripts/build_daily_features.py alpha158 --input $R/raw/d
 uv run --env-file .env scripts/build_daily_features.py us_market63 --input $R/raw/daily_index_us_market63.parquet --output $R/derived/us_market63
 ```
 
+**美股 v3（CRSP，按市值前 1,500 只，2000–2025）。** 需要能访问 CRSP 的 WRDS 账号（数据受许可约束，请勿公开）。在 WRDS 网站导出 CIZ *Stock – Version 2* 日度股票文件（2000-01-01 → 2025-12-31）。`import_crsp.py` 将其转换为相同的表：每天市值最大、价格高于 5 美元的 1,500 只美国普通股，以 PERMNO（`NNNNN.CRSP`）标识，价格按总回报复权，`delistings.parquet` 使用 CRSP 自带的退市收益。然后以 `R=r2://stock-transformer-data/us/v3` 运行上面的标签与特征构建命令。
+
+```bash
+uv run --env-file .env scripts/import_crsp.py --input <WRDS 导出文件>.zip --output r2://stock-transformer-data/us/v3/raw
+```
+
 美股流程目前覆盖 Stage 1（日频特征），其余工作（美股调参、390 根分钟线特征）见 [docs/us_phase2_plan.md](docs/us_phase2_plan.md)。
 
 ### 终端仪表盘

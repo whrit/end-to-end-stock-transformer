@@ -11,7 +11,6 @@ import argparse
 import datetime as dt
 import json
 import os
-import tempfile
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Sequence
 
@@ -20,9 +19,8 @@ from rich.console import Group
 from rich.table import Table
 from rich.text import Text
 
-from market_guided_stock_alpha.artifacts import atomic_write_json, sha256_path
 from market_guided_stock_alpha.progress import board, kv_table, note, run_main
-from market_guided_stock_alpha.storage import is_remote, publish, r2_client_from_env
+from market_guided_stock_alpha.storage import is_remote, r2_client_from_env
 from market_guided_stock_alpha.us_data.alpaca import (
     NEW_YORK,
     US_EXCHANGES,
@@ -40,9 +38,9 @@ from market_guided_stock_alpha.us_data.universe import (
     EQUITY_SECTOR,
     MARKET63_ETFS,
     MARKET84_ETFS,
-    TABLE_FILES,
     build_securities,
     build_us_tables,
+    write_raw_tables,
 )
 from market_guided_stock_alpha.us_data.sp500 import (
     PERFORMANCE_DRAWDOWN,
@@ -58,7 +56,6 @@ from market_guided_stock_alpha.us_data.sp500 import (
 
 DEFAULT_OUTPUT = "r2://stock-transformer-data/us/v1/raw"
 REQUIRED_ENV = ("APCA_API_KEY_ID", "APCA_API_SECRET_KEY", "OPENFIGI_API_KEY")
-MANIFEST_NAME = "fetch_manifest.json"
 
 
 def required_env(environ: Mapping[str, str] = os.environ) -> Dict[str, str]:
@@ -100,24 +97,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="fja05680/sp500 'Historical Components & Changes (Updated)' CSV (URL or path).",
     )
     return parser
-
-
-def _write_tables(
-    tables: Mapping[str, pd.DataFrame], manifest: Dict[str, Any], directory: Path
-) -> None:
-    directory.mkdir(parents=True)
-    files = {}
-    for name, frame in tables.items():
-        filename = TABLE_FILES.get(name, "{}.parquet".format(name))
-        path = directory / filename
-        frame.to_parquet(path, index=False)
-        files[name] = {
-            "file": filename,
-            "rows": int(len(frame)),
-            "sha256": sha256_path(path),
-        }
-    manifest["tables"] = files
-    atomic_write_json(directory / MANIFEST_NAME, manifest)
 
 
 STAGES = (
@@ -336,17 +315,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     }
 
     _stage(6, "writing tables to {}".format(args.output))
-    if remote:
-        with tempfile.TemporaryDirectory() as workdir:
-            staged = Path(workdir) / "raw"
-            _write_tables(tables, manifest, staged)
-            publish(staged, args.output, client=r2_client)
-    else:
-        local_output.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(dir=str(local_output.parent)) as workdir:
-            staged = Path(workdir) / "raw"
-            _write_tables(tables, manifest, staged)
-            os.replace(str(staged), str(local_output))
+    write_raw_tables(tables, manifest, args.output, client=r2_client)
     note(kv_table(QUALITY, title="data quality"))
     print(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True))
     return 0
