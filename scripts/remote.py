@@ -383,7 +383,8 @@ DEFAULT_IMAGE = "nvidia/cuda:13.0.3-base-ubuntu24.04"
 R2_VARIABLES = ("R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY")
 
 # Hard rental limits: prompts and flags may tighten them, never loosen them.
-MAX_PRICE_PER_HOUR = 0.50
+MAX_PRICE_PER_HOUR = 1.50
+DEFAULT_PRICE_PER_HOUR = 0.50  # used unless a flag or prompt asks for more, up to the cap
 MIN_NETWORK_MBPS = 750.0  # both upload and download
 REGIONS = ("US", "CA", "MX")  # North America, by vast.ai country code
 # Compatibility with the locked CUDA torch, two independent checks:
@@ -435,7 +436,7 @@ def _within_limits(offer: Dict[str, Any], max_price: float, min_network: float) 
 
 
 def _checked_limits(max_price: Optional[float], min_network: Optional[float]) -> Tuple[float, float]:
-    price = MAX_PRICE_PER_HOUR if max_price is None else float(max_price)
+    price = DEFAULT_PRICE_PER_HOUR if max_price is None else float(max_price)
     network = MIN_NETWORK_MBPS if min_network is None else float(min_network)
     if not 0 < price <= MAX_PRICE_PER_HOUR:
         raise ValueError("max $/hour must be above 0 and at most {:.2f}".format(MAX_PRICE_PER_HOUR))
@@ -756,8 +757,8 @@ def build_parser() -> argparse.ArgumentParser:
     rent.add_argument("--gpus", type=int, default=1, help="minimum GPU count")
     rent.add_argument("--min-vram", type=float, default=16.0, help="minimum VRAM per GPU, GB")
     rent.add_argument(
-        "--max-price", type=float, default=MAX_PRICE_PER_HOUR,
-        help="maximum $/hour (default and hard cap {:.2f})".format(MAX_PRICE_PER_HOUR),
+        "--max-price", type=float, default=DEFAULT_PRICE_PER_HOUR,
+        help="maximum $/hour (default {:.2f}, hard cap {:.2f})".format(DEFAULT_PRICE_PER_HOUR, MAX_PRICE_PER_HOUR),
     )
     rent.add_argument(
         "--min-network", type=float, default=MIN_NETWORK_MBPS,

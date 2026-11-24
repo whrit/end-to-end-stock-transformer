@@ -369,7 +369,7 @@ uv run --env-file .env scripts/remote.py instances   # your vast.ai instances an
 ```
 
 The picker always applies these rental limits; you can make them stricter but never looser:
-- at most $0.50/hour;
+- at most $1.50/hour (default $0.50/hour; raise it with `--max-price` or at the prompt);
 - at least 750 Mb/s upload and download;
 - North America only (US, Canada, Mexico);
 - a GPU and host driver that can run the locked CUDA torch (Turing or newer, CUDA 13+ driver; the CUDA minimum is read from `uv.lock`).

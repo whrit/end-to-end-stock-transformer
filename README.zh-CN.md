@@ -371,7 +371,7 @@ uv run --env-file .env scripts/remote.py instances   # 你的 vast.ai 实例及�
 ```
 
 选择器始终应用以下租用限制，只能收紧、不能放宽：
-- 每小时不超过 $0.50；
+- 每小时不超过 $1.50（默认 $0.50；可用 `--max-price` 或在提示中调高）；
 - 上传和下载速度均不低于 750 Mb/s；
 - 仅限北美（美国、加拿大、墨西哥）；
 - GPU 与主机驱动必须能运行锁定的 CUDA 版 torch（Turing 及以上架构、CUDA 13+ 驱动；CUDA 最低版本从 `uv.lock` 读取）。
