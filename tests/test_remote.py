@@ -23,12 +23,14 @@ class BestValueTest(unittest.TestCase):
         kept = [offer["id"] for offer in remote._best_value(offers)]
         self.assertEqual(kept, ["cheap", "tie_faster", "fast"])
 
-    def test_ranks_multi_gpu_offers_by_the_one_gpu_a_job_uses(self):
+    def test_ranks_multi_gpu_offers_by_the_whole_machine(self):
+        # The agent runs jobs on every GPU, so two slower cards can beat one faster card.
         offers = [
             {"id": "one_fast", "dph_total": 0.10, "total_flops": 30.0, "num_gpus": 1},
             {"id": "two_slow", "dph_total": 0.15, "total_flops": 40.0, "num_gpus": 2},
+            {"id": "four_slower", "dph_total": 0.20, "total_flops": 36.0, "num_gpus": 4},
         ]
-        self.assertEqual([offer["id"] for offer in remote._best_value(offers)], ["one_fast"])
+        self.assertEqual([offer["id"] for offer in remote._best_value(offers)], ["one_fast", "two_slow"])
 
 
 if __name__ == "__main__":

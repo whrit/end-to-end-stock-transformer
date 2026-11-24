@@ -511,9 +511,9 @@ def search_offers(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def _best_value(offers: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Cheapest first, keeping only offers with more TFLOPS per GPU than every
-    cheaper (or equal-priced) one: each row is the most compute a single-GPU job
-    can use at its price. Per GPU because ``run_rolling.py`` trains on one GPU."""
+    """Cheapest first, keeping only offers with more TFLOPS than every cheaper
+    (or equal-priced) one: each row is the most compute the price buys. Whole
+    machine, because the agent runs ``--slots`` jobs on every GPU."""
     ranked = sorted(offers, key=lambda offer: (float(offer.get("dph_total") or 0.0), -_tflops(offer)))
     kept: List[Dict[str, Any]] = []
     for offer in ranked:
@@ -523,16 +523,21 @@ def _best_value(offers: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def _tflops(offer: Dict[str, Any]) -> float:
-    """TFLOPS of one GPU of the offer (vast.ai's ``total_flops`` sums all GPUs)."""
-    return float(offer.get("total_flops") or 0.0) / max(int(offer.get("num_gpus") or 1), 1)
+    """TFLOPS of the whole offer (vast.ai's ``total_flops`` sums all GPUs)."""
+    return float(offer.get("total_flops") or 0.0)
+
+
+def _gpus(offer: Dict[str, Any]) -> int:
+    return max(int(offer.get("num_gpus") or 1), 1)
 
 
 def _offer_table(offers: List[Dict[str, Any]]) -> Table:
     table = Table(header_style="bold dodger_blue1", border_style="grey37", title_style="bold dodger_blue1")
     for name, justify in (
         ("#", "right"), ("GPU", "left"), ("VRAM", "right"), ("RAM", "right"), ("disk", "right"),
-        ("$/h", "right"), ("TFLOPS/GPU", "right"), ("DLPerf", "right"), ("perf/$", "right"), ("reliab.", "right"),
-        ("net ↑", "right"), ("net ↓", "right"), ("CUDA", "right"), ("location", "left"),
+        ("$/h", "right"), ("TFLOPS", "right"), ("TFLOPS/GPU", "right"), ("CPUs", "right"), ("DLPerf", "right"),
+        ("perf/$", "right"), ("reliab.", "right"), ("net ↑", "right"), ("net ↓", "right"), ("CUDA", "right"),
+        ("location", "left"),
     ):
         table.add_column(name, justify=justify, no_wrap=True)
     for index, offer in enumerate(offers, start=1):
@@ -547,6 +552,8 @@ def _offer_table(offers: List[Dict[str, Any]]) -> Table:
             "{:.0f} GB".format(float(offer.get("disk_space") or 0)),
             Text("${:.3f}".format(price), style="green"),
             Text("{:.1f}".format(_tflops(offer)), style="bold"),
+            "{:.1f}".format(_tflops(offer) / _gpus(offer)),
+            "{:.0f}".format(float(offer.get("cpu_cores_effective") or 0)),
             "{:.0f}".format(perf),
             Text("{:.0f}".format(perf / price if price else 0.0), style="cyan"),
             Text("{:.1%}".format(reliability), style="green" if reliability >= 0.99 else "yellow"),
