@@ -6,7 +6,7 @@
   "label_contract": {"name": "spy_relative_excess_return_t1_t6", "benchmark": "SPY.US", "holding_period_trading_days": 5, "dependency_offset_trading_days": 6},
   "feature_layout": "us_stage1_market63",
   "model": {"family": "master", "d_model": 128, "temporal_heads": 4, "spatial_heads": 2, "dropout": 0.5, "beta": 10.0, "ablation": "none"},
-  "training": {"epochs": 40, "optimizer": {"learning_rate": 3e-05, "weight_decay": 0.0, "gradient_clip_value": 3.0}, "loss": {"name": "mse"}, "early_stopping": {"enabled": true, "patience": 8, "minimum_epochs": 10}, "minimum_valid_labels": 2, "checkpoint_every": 1, "primary_metric": "mean_rank_ic"},
+  "training": {"epochs": 40, "optimizer": {"learning_rate": 3e-05, "weight_decay": 0.0, "gradient_clip_value": 3.0}, "loss": {"name": "mse"}, "early_stopping": {"enabled": true, "patience": 4, "minimum_epochs": 5}, "minimum_valid_labels": 2, "checkpoint_every": 1, "primary_metric": "mean_rank_ic"},
   "rolling": {"frequency": "semiannual", "train_start": "2001-01-01", "test_start": "2012-01-01", "test_end": "2022-12-31"},
   "initialization": "warm",
   "seeds": [42],
