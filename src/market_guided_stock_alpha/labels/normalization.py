@@ -7,7 +7,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from market_guided_stock_alpha.data.contracts import US_SECURITY_CODE
+from market_guided_stock_alpha.data.contracts import US_SECURITY_CODE, map_distinct
 
 LABEL_KEY_COLUMNS = ("trade_date", "sec_code")
 _CANONICAL_CODE = re.compile(r"^(\d{6})\.(SH|SZ|BJ)$", re.IGNORECASE)
@@ -192,9 +192,7 @@ def normalize_label_object(obj: Any, value_column: str) -> pd.DataFrame:
     result = frame.loc[:, [date_column, code_column, value_column]].copy()
     result.columns = ["trade_date", "sec_code", "label_value"]
     result["trade_date"] = normalize_trade_dates(result["trade_date"]).to_numpy()
-    result["sec_code"] = [
-        normalize_security_code(value) for value in result["sec_code"]
-    ]
+    result["sec_code"] = map_distinct(normalize_security_code, result["sec_code"])
     result["label_value"] = pd.to_numeric(
         result["label_value"], errors="coerce"
     ).astype("float64")

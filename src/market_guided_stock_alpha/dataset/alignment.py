@@ -1,5 +1,6 @@
 """Explicit date/security alignment over canonical mmap feature artifacts."""
 
+import functools
 from typing import Sequence, Tuple
 
 import numpy as np
@@ -7,6 +8,9 @@ import pandas as pd
 
 from market_guided_stock_alpha.data.contracts import normalize_security_code
 from market_guided_stock_alpha.derived.artifact import FeatureArtifact
+
+# Every training batch re-checks ~1,500 codes from a fixed universe: remember the answers.
+_normalized_code = functools.lru_cache(maxsize=None, typed=True)(normalize_security_code)
 
 
 class AlignmentError(ValueError):
@@ -39,7 +43,7 @@ class ArtifactLookup:
 
     @staticmethod
     def _codes(values: Sequence[object]) -> Tuple[str, ...]:
-        codes = tuple(normalize_security_code(value) for value in values)
+        codes = tuple(_normalized_code(value) for value in values)
         if len(codes) != len(set(codes)):
             raise AlignmentError("requested securities contain duplicates")
         return codes

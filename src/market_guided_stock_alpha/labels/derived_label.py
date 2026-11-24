@@ -22,6 +22,9 @@ class DerivedLabelReader:
         self.manifest_path = Path(manifest_path) if manifest_path is not None else None
         if not self.column:
             raise ValueError("Derived-label value column must be non-empty")
+        # One rolling run aligns three datasets per target against the same file;
+        # reading, hashing and normalizing 16M rows each time dominated preparation.
+        self._loaded: Optional[Tuple[pd.DataFrame, Dict[str, Any]]] = None
 
     def _manifest_metadata(self, artifact_sha256: str) -> Dict[str, Any]:
         if self.manifest_path is None:
@@ -52,6 +55,10 @@ class DerivedLabelReader:
         }
 
     def load(self) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+        """The normalized labels and provenance, read and verified on first use."""
+        if self._loaded is not None:
+            labels, metadata = self._loaded
+            return labels, dict(metadata)
         if not self.path.is_file():
             raise FileNotFoundError(
                 "Derived-label artifact is missing: {}".format(self.path)
@@ -94,7 +101,8 @@ class DerivedLabelReader:
             ),
         }
         metadata.update(self._manifest_metadata(before_sha256))
-        return labels, metadata
+        self._loaded = (labels, metadata)
+        return labels, dict(metadata)
 
     def align(self, target: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, Any]]:
         required = {"trade_date", "sec_code"}

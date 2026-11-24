@@ -1,7 +1,7 @@
 """Strict canonical DataFrame contracts used by public research formulas."""
 
 import re
-from typing import Any, Iterable, Optional, Sequence, Tuple
+from typing import Any, Callable, Iterable, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -59,6 +59,19 @@ def normalize_security_code(value: Any, context: str = "security code") -> str:
             "exchange guessing is disabled".format(context, value)
         )
     return text
+
+
+def map_distinct(function: Callable[[Any], Any], values: Any) -> np.ndarray:
+    """``function`` applied to every value, but called once per distinct value:
+    a code column repeats ~5,000 codes across millions of rows."""
+    series = pd.Series(values, copy=False)
+    positions, uniques = pd.factorize(series)
+    mapped = np.empty(len(uniques) + 1, dtype=object)
+    mapped[:-1] = [function(value) for value in uniques]
+    missing = positions == -1
+    if missing.any():  # the function decides about missing values (normally: raise)
+        mapped[-1] = function(series[missing].iloc[0])
+    return mapped[positions]
 
 
 def normalize_date_values(values: Any, context: str) -> pd.Series:
@@ -121,10 +134,9 @@ def validate_daily_stock(
     output["trade_date"] = normalize_date_values(
         output["trade_date"], "daily stock trade_date"
     ).to_numpy()
-    output["sec_code"] = [
-        normalize_security_code(value, "daily stock sec_code")
-        for value in output["sec_code"]
-    ]
+    output["sec_code"] = map_distinct(
+        lambda value: normalize_security_code(value, "daily stock sec_code"), output["sec_code"]
+    )
     _numeric_columns(output, required[2:], "daily stock")
     _unique_keys(output, ("trade_date", "sec_code"), "daily stock")
     return output.sort_values(
@@ -187,15 +199,13 @@ def validate_membership(frame: pd.DataFrame) -> pd.DataFrame:
     output["trade_date"] = normalize_date_values(
         output["trade_date"], "membership trade_date"
     ).to_numpy()
-    output["sec_code"] = [
-        normalize_security_code(value, "membership sec_code")
-        for value in output["sec_code"]
-    ]
+    output["sec_code"] = map_distinct(
+        lambda value: normalize_security_code(value, "membership sec_code"), output["sec_code"]
+    )
     if "index_code" in output:
-        output["index_code"] = [
-            normalize_security_code(value, "membership index_code")
-            for value in output["index_code"]
-        ]
+        output["index_code"] = map_distinct(
+            lambda value: normalize_security_code(value, "membership index_code"), output["index_code"]
+        )
     if "weight" in output:
         _numeric_columns(output, ("weight",), "membership")
     _unique_keys(output, MEMBERSHIP_COLUMNS, "membership")
