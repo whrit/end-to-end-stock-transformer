@@ -167,7 +167,7 @@ There is no linter or formatter configured. Match the surrounding style.
 
 ## Important Files
 
-- Entry points: `scripts/run_rolling.py`, `scripts/build_daily_features.py`, `scripts/build_intraday_features.py`, `scripts/build_relative_excess_label.py`, `scripts/fetch_us_daily.py`, `scripts/watch.py`, `scripts/remote.py` (agent: `src/market_guided_stock_alpha/jobs.py`), `scripts/sweep.py` (`make` writes grid configs, `compare` ranks runs by out-of-sample rank IC)
+- Entry points: `scripts/run_rolling.py`, `scripts/build_daily_features.py`, `scripts/build_intraday_features.py`, `scripts/build_relative_excess_label.py`, `scripts/fetch_us_daily.py`, `scripts/watch.py`, `scripts/remote.py` (agent: `src/market_guided_stock_alpha/jobs.py`), `scripts/sweep.py` (`make` writes grid configs, `--grid seeds='[43]','[44]'` gives one parallel run per seed named `<name>_seedNN`; `compare` ranks runs by out-of-sample rank IC, grouping `_seedNN` runs with their base: mean and seed sd)
 - Config schema and wiring: `src/market_guided_stock_alpha/rolling/configuration.py`
   - Required top-level keys: `schema_version: 1`, `experiment_name`, `research_position`, `universe: "dynamic_all_a_shares"`, `label_contract`, `feature_layout`, `model`, `training`, `rolling`, `initialization`, `seeds`, `data`, `output_root`
 - Orchestration: `rolling/runner.py`. Run output layout:

@@ -11,14 +11,22 @@
     # rank every finished tune_us_* run (local runs/ dir or r2://.../runs)
     uv run --env-file .env scripts/sweep.py compare r2://stock-transformer-data/us/v1/runs --prefix tune_us
 
+    # more seeds of a config, as separate runs that train in parallel (<name>_seed43, ...)
+    uv run scripts/sweep.py make configs/us/secondary/tune_v3_gru.json --prefix tune_v3_gru \\
+        --out configs/us/secondary --grid seeds='[43]','[44]'
+
 Values are JSON. Runs are ranked on the out-of-sample rank IC of their test
 window (the tuning window, never the final test period); "valid rIC" is the
 in-target validation score that early stopping already picked, so it is biased up.
+compare groups ``<name>_seedNN`` runs with ``<name>``: rank IC is the mean over
+all their seeds and "seed sd" its spread across seeds.
 """
 
 import argparse
 import itertools
 import json
+import re
+import statistics
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Sequence, Tuple
@@ -54,6 +62,8 @@ def _pair(text: str) -> Tuple[str, str]:
 
 def _label(dotted: str, value: Any) -> str:
     key = dotted.rsplit(".", 1)[-1]
+    if key == "seeds" and isinstance(value, list) and len(value) == 1:
+        return "seed{}".format(value[0])
     text = "{:g}".format(value) if isinstance(value, float) else str(value)
     return "{}{}".format(SHORT.get(key, key), text)
 
@@ -107,20 +117,27 @@ def _runs(root: str, prefix: str, directory: Path) -> Path:
     return directory
 
 
-def _summary(run: Path) -> Dict[str, Any]:
-    overall = [json.loads(path.read_text(encoding="utf-8")) for path in sorted(run.glob("seed_*/overall.json"))]
-    targets = [json.loads(path.read_text(encoding="utf-8")) for path in sorted(run.glob("seed_*/target_*/metrics.json"))]
+_SEED_SUFFIX = re.compile(r"_seed\d+$")
+
+
+def _summary(name: str, runs: Sequence[Path]) -> Dict[str, Any]:
+    overall = [json.loads(path.read_text(encoding="utf-8")) for run in runs for path in sorted(run.glob("seed_*/overall.json"))]
+    targets = [
+        json.loads(path.read_text(encoding="utf-8")) for run in runs for path in sorted(run.glob("seed_*/target_*/metrics.json"))
+    ]
 
     def mean(values: Sequence[Any]) -> float:
         numbers = [float(value) for value in values if value is not None]
         return sum(numbers) / len(numbers) if numbers else float("nan")
 
+    rank_ics = [float(item["rank_ic"]) for item in overall if item.get("rank_ic") is not None]
     training = [target.get("training") or {} for target in targets]
     return {
-        "run": run.name,
+        "run": name,
         "seeds": len(overall),
         "targets": len(targets),
-        "rank_ic": mean([item.get("rank_ic") for item in overall]),
+        "rank_ic": mean(rank_ics),
+        "seed_sd": statistics.stdev(rank_ics) if len(rank_ics) > 1 else float("nan"),
         "ic": mean([item.get("ic") for item in overall]),
         "top10": mean([item.get("top10") for item in overall]),
         "valid": mean([item.get("best_validation_metric") for item in training]),
@@ -132,20 +149,23 @@ def _summary(run: Path) -> Dict[str, Any]:
 def cmd_compare(args: argparse.Namespace) -> int:
     with tempfile.TemporaryDirectory(prefix="sweep_") as directory:
         root = _runs(args.root, args.prefix, Path(directory))
-        rows: List[Dict[str, Any]] = [
-            _summary(run) for run in sorted(root.iterdir()) if run.is_dir() and run.name.startswith(args.prefix)
-        ]
+        groups: Dict[str, List[Path]] = {}
+        for run in sorted(root.iterdir()):
+            if run.is_dir() and run.name.startswith(args.prefix):
+                groups.setdefault(_SEED_SUFFIX.sub("", run.name), []).append(run)
+        rows: List[Dict[str, Any]] = [_summary(name, runs) for name, runs in groups.items()]
     rows = [row for row in rows if row["seeds"]]
     if not rows:
         raise SystemExit("error: no finished seed (seed_*/overall.json) for runs named {}*".format(args.prefix))
     rows.sort(key=lambda row: row["rank_ic"], reverse=True)
     table = Table(title="{}* ranked by out-of-sample rank IC".format(args.prefix), header_style="bold dodger_blue1")
-    for name in ("run", "seeds", "targets", "rank IC", "IC", "top10", "valid rIC", "epochs", "best ep"):
+    for name in ("run", "seeds", "targets", "rank IC", "seed sd", "IC", "top10", "valid rIC", "epochs", "best ep"):
         table.add_column(name, justify="left" if name == "run" else "right", no_wrap=True)
     for row in rows:
         table.add_row(
             row["run"], str(row["seeds"]), str(row["targets"]),
-            "{:+.4f}".format(row["rank_ic"]), "{:+.4f}".format(row["ic"]), "{:+.4f}".format(row["top10"]),
+            "{:+.4f}".format(row["rank_ic"]), "{:.4f}".format(row["seed_sd"]),
+            "{:+.4f}".format(row["ic"]), "{:+.4f}".format(row["top10"]),
             "{:+.4f}".format(row["valid"]), "{:.1f}".format(row["epochs"]), "{:.1f}".format(row["best_epoch"]),
         )
     Console().print(table)
