@@ -450,5 +450,90 @@ class RobustFitBlockingTest(unittest.TestCase):
             self.assertTrue(blocked.zero_mad_mask[4])
 
 
+class RowTableTest(unittest.TestCase):
+    """The device row table must give exactly the batches and training results
+    of building every date from the artifact."""
+
+    def _dataset(self, root):
+        from market_guided_stock_alpha.dataset.normalization import FeatureStatistics
+
+        dates = pd.bdate_range("2024-01-02", periods=12)
+        names = feature_names("alpha158")
+        rng = np.random.default_rng(11)
+        values = rng.standard_t(3, size=(len(dates), len(CODES_PHYSICAL), len(names))).astype("float32") * 5
+        values[rng.random(values.shape) < 0.05] = np.nan
+        observed = rng.random(values.shape[:2]) > 0.2
+        write_feature_artifact(
+            root / "alpha158", "alpha158", values, dates, names,
+            security_codes=CODES_PHYSICAL, source_observed=observed,
+        )
+        alpha = read_alpha158_artifact(root / "alpha158")
+        market = write_market(root, "market63", dates)
+        membership, reader = membership_and_labels(root, dates)
+        statistics = dict(identity_statistics(FeatureLayout.stage1()).by_family, alpha158=FeatureStatistics(
+            feature_names=names,
+            median=rng.normal(size=len(names)),
+            mad=np.ones(len(names)),
+            scale=rng.uniform(0.5, 2.0, size=len(names)),
+            finite_count=np.ones(len(names), dtype="int64"),
+            zero_mad_mask=np.zeros(len(names), dtype="bool"),
+        ))
+        return SequenceDataset(
+            alpha, market, membership, reader, TradingCalendar(calendar_frame()), DatasetStatistics(statistics),
+        )
+
+    def test_row_table_batches_and_training_match_building_each_date(self):
+        from unittest import mock
+
+        import torch
+
+        from market_guided_stock_alpha.modeling import MasterModel, WholeDateLoader
+        from market_guided_stock_alpha.training import EarlyStoppingConfig, Trainer, TrainingConfig
+
+        fields = ("stock_features", "market_features", "labels", "labels_raw", "label_mask", "stock_mask")
+        transport = "market_guided_stock_alpha.modeling.transport."
+        with tempfile.TemporaryDirectory() as directory:
+            dataset = self._dataset(Path(directory))
+            plain = WholeDateLoader(dataset, shuffle=True, seed=5)
+            for place, gpu, ram in (("GPU", 1 << 40, 0), ("RAM", 0, 1 << 40)):
+                with self.subTest(place=place), mock.patch(transport + "gpu_cache_budget", return_value=gpu), \
+                        mock.patch(transport + "ram_cache_budget", return_value=ram):
+                    table = WholeDateLoader(dataset, shuffle=True, seed=5, cache=True)
+                    for epoch in (1, 2):
+                        plain.set_epoch(epoch)
+                        table.set_epoch(epoch)
+                        for got, want in zip(list(table), list(plain), strict=True):
+                            self.assertEqual(got.prediction_date, want.prediction_date)
+                            self.assertEqual(got.security_codes, want.security_codes)
+                            for field in fields:
+                                torch.testing.assert_close(
+                                    getattr(got, field), getattr(want, field), rtol=0, atol=0, equal_nan=True, msg=field
+                                )
+                    self.assertIsNotNone(table._table)
+                    self.assertTrue(np.isin(0.0, table._table[0].numpy()))  # NaN raw values became 0
+                    self.assertTrue(np.isin(3.0, table._table[0].numpy()))  # outliers clipped
+
+            results = []
+            mock.patch(transport + "gpu_cache_budget", return_value=1 << 40).start()
+            self.addCleanup(mock.patch.stopall)
+            for cache in (False, True):
+                torch.manual_seed(7)
+                model = MasterModel.from_layout(
+                    FeatureLayout.stage1(), d_model=16, temporal_heads=4, spatial_heads=2, dropout=0.1
+                )
+                config = TrainingConfig(
+                    epochs=2, seed=7,
+                    early_stopping=EarlyStoppingConfig(enabled=False, patience=1, minimum_epochs=1),
+                )
+                history = Trainer(model, config, device="cpu").fit(
+                    WholeDateLoader(dataset, shuffle=True, seed=7, cache=cache),
+                    WholeDateLoader(dataset, cache=cache),
+                )["history"]
+                results.append([(row["train_loss"], row["validation_loss"]) for row in history])
+            self.assertEqual(results[0], results[1])
+            del dataset, plain, table
+            gc.collect()
+
+
 if __name__ == "__main__":
     unittest.main()

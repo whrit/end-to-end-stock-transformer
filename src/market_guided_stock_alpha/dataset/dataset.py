@@ -1,7 +1,7 @@
 """Lazy neutral rolling-sequence dataset over canonical mmap artifacts."""
 
 from dataclasses import dataclass
-from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -224,6 +224,12 @@ class SequenceDataset:
         return len(self.anchor_dates)
 
     def __getitem__(self, position: int) -> SequenceSample:
+        return self.sample(position)
+
+    def sample(self, position: int, stock: bool = True) -> SequenceSample:
+        """The sample at ``position``. ``stock=False`` skips the stock gather:
+        ``stock_features`` is then ``[N, lookback, 0]`` and ``stock_mask`` all
+        False, placeholders for rows taken from ``stock_row_index``."""
         if type(position) is not int or position < 0 or position >= len(self):
             raise IndexError("dataset position is out of range")
         prediction_date = pd.Timestamp(self.anchor_dates[position])
@@ -234,24 +240,29 @@ class SequenceDataset:
             [self.security_id_by_code[code] for code in codes], dtype="int32"
         )
 
-        alpha_raw, alpha_observed = self.lookups["alpha158"].cross_section_window(
-            history, codes
-        )
-        alpha = self.statistics.require(
-            "alpha158", feature_names("alpha158")
-        ).transform(alpha_raw)
-        stock_parts = [alpha]
-        component_masks: Dict[str, np.ndarray] = {"alpha158": alpha_observed}
-        if "intraday_price_volume" in self.layout.stock_families:
-            intraday_raw, intraday_observed = self.lookups[
-                "intraday_price_volume"
-            ].cross_section_window(history, codes, allow_missing=True)
-            intraday = self.statistics.require(
-                "intraday_price_volume", feature_names("intraday_price_volume")
-            ).transform(intraday_raw)
-            stock_parts.append(intraday)
-            component_masks["intraday_price_volume"] = intraday_observed
-        stock = np.concatenate(stock_parts, axis=2).astype("float32", copy=False)
+        component_masks: Dict[str, np.ndarray] = {}
+        if stock:
+            alpha_raw, alpha_observed = self.lookups["alpha158"].cross_section_window(
+                history, codes
+            )
+            alpha = self.statistics.require(
+                "alpha158", feature_names("alpha158")
+            ).transform(alpha_raw)
+            stock_parts = [alpha]
+            component_masks["alpha158"] = alpha_observed
+            if "intraday_price_volume" in self.layout.stock_families:
+                intraday_raw, intraday_observed = self.lookups[
+                    "intraday_price_volume"
+                ].cross_section_window(history, codes, allow_missing=True)
+                intraday = self.statistics.require(
+                    "intraday_price_volume", feature_names("intraday_price_volume")
+                ).transform(intraday_raw)
+                stock_parts.append(intraday)
+                component_masks["intraday_price_volume"] = intraday_observed
+            stock = np.concatenate(stock_parts, axis=2).astype("float32", copy=False)
+        else:
+            stock = np.empty((len(codes), len(history), 0), dtype="float32")
+            alpha_observed = np.zeros((len(codes), len(history)), dtype="bool")
 
         market_raw, market_observed = self.lookups[
             self.layout.market_family
@@ -296,6 +307,34 @@ class SequenceDataset:
             intraday_market_features=exploratory,
             intraday_market_mask=exploratory_mask,
         )
+
+    def stock_row_index(self) -> Tuple[np.ndarray, List[np.ndarray]]:
+        """Every Alpha158 (date, security) row the samples read, once each.
+
+        Returns the artifact positions of those rows as ``[R, 2]`` (date,
+        security), sorted by date, and per sample an ``[N, lookback]`` index into
+        them in the sample's own order: ``rows[index]`` equals the sample's
+        ``stock_features`` (Alpha158-only layouts)."""
+        if self.layout.stock_families != ("alpha158",):
+            raise ValueError("stock row table needs an Alpha158-only layout")
+        lookup = self.lookups["alpha158"]
+        width = len(lookup.artifact.security_codes)
+        keys = []
+        for day in self.anchor_dates:
+            dates = lookup.require_dates(self.history_dates(day))
+            securities = lookup.require_securities(self._member_groups[day]["sec_code"].tolist())
+            keys.append(dates[None, :] * width + securities[:, None])
+        unique = np.unique(np.concatenate([key.ravel() for key in keys]))
+        index = [np.searchsorted(unique, key) for key in keys]
+        return np.stack([unique // width, unique % width], axis=1), index
+
+    def stock_rows(self, date_position: int, security_positions: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        """Normalized float32 Alpha158 rows and source_observed for one artifact
+        date; the transform is per value, so these equal the sample values."""
+        artifact = self.artifacts["alpha158"]
+        raw = np.asarray(artifact.values[date_position, security_positions, :])
+        values = self.statistics.require("alpha158", feature_names("alpha158")).transform(raw)
+        return values, np.asarray(artifact.source_observed)[date_position, security_positions]
 
 
 def last_day_tabular_view(sample: SequenceSample) -> Dict[str, Any]:

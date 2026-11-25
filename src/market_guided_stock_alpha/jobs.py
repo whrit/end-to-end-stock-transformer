@@ -17,7 +17,7 @@ Layout under the jobs root (``r2://bucket/jobs`` or a local directory)::
     _agents/<name>.json  agent heartbeat (GPU, state, current jobs)
     _agent/jobs.py       this file, as fetched by the instance start command
 
-Run the agent on an instance:  python jobs.py agent --root r2://bucket/jobs [--slots 3]
+Run the agent on an instance:  python jobs.py agent --root r2://bucket/jobs [--slots 2]
 """
 
 import argparse
@@ -47,9 +47,12 @@ POLL_SECONDS = 15.0
 LOG_UPLOAD_SECONDS = 30.0
 HEARTBEAT_SECONDS = 60.0
 FINAL_STATES = ("done", "failed", "stopped", "cancelled")
-# Jobs one agent runs side by side. A training step is CPU/launch-bound and uses
-# ~2-4 GB of GPU memory, so a single job leaves the GPU mostly idle.
-DEFAULT_SLOTS = 3
+# Jobs one agent runs side by side on each GPU. Each training job keeps its
+# per-target row table on the GPU (~5.6 GB for a late US v3 target) plus a 6 GB
+# training reserve, so a slot needs ~12 GB of GPU memory; more than 3 jobs per
+# GPU only fight over CPU cores.
+GIB_PER_SLOT = 12
+MAX_SLOTS = 3
 
 
 RETRY_ATTEMPTS = 10  # final log and state writes ride out ~5 minutes without R2
@@ -240,6 +243,21 @@ def gpu_count() -> int:
     return max(1, len([line for line in output.splitlines() if line.strip()]))
 
 
+def default_slots() -> int:
+    """Jobs per GPU that fit the smallest GPU here: 24 GB -> 2, 16 GB -> 1 (1 without GPUs)."""
+    try:
+        output = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=10, check=False,
+        ).stdout
+        mebibytes = [int(line) for line in output.split() if line.strip()]
+    except (OSError, subprocess.SubprocessError, ValueError):
+        mebibytes = []
+    if not mebibytes:
+        return 1
+    return max(1, min(MAX_SLOTS, (min(mebibytes) + 512) // 1024 // GIB_PER_SLOT))
+
+
 def job_command(job: Dict[str, Any]) -> List[str]:
     command = [
         "uv", "run", "--frozen", "--all-extras", "scripts/run_rolling.py", "job_config.json",
@@ -256,7 +274,8 @@ class Agent(object):
     """Claims queued jobs and runs up to ``slots`` per GPU at once, each pinned to
     the least-busy GPU; never touches the instance."""
 
-    def __init__(self, store: JobStore, name: str, workdir: Path, once: bool = False, slots: int = DEFAULT_SLOTS) -> None:
+    def __init__(self, store: JobStore, name: str, workdir: Path, once: bool = False, slots: Optional[int] = None) -> None:
+        slots = default_slots() if slots is None else slots
         if slots < 1:
             raise ValueError("slots must be at least 1")
         self.store = store
@@ -500,7 +519,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     agent.add_argument("--name", default=os.environ.get("MGSA_AGENT") or socket.gethostname())
     agent.add_argument("--workdir", type=Path, default=Path.home() / "mgsa_jobs")
     agent.add_argument("--once", action="store_true", help="exit after one job (testing)")
-    agent.add_argument("--slots", type=int, default=DEFAULT_SLOTS, help="jobs per GPU (default {})".format(DEFAULT_SLOTS))
+    agent.add_argument("--slots", type=int, help="jobs per GPU (default: GPU memory / {} GB, at most {})".format(GIB_PER_SLOT, MAX_SLOTS))
     args = parser.parse_args(argv)
     if not args.root:
         parser.error("--root or MGSA_JOBS is required")

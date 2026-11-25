@@ -101,6 +101,14 @@ class JobQueueTest(unittest.TestCase):
             self.assertIn("TMPDIR={}".format(work / "j1" / "tmp"), store.get_text("j1/job.log"))
             self.assertFalse((work / "j1").exists())
 
+    def test_default_slots_fit_the_smallest_gpu(self):
+        # nvidia-smi MiB: a 24 GB card reports slightly under 24 GiB
+        for output, slots in (("24564\n24564\n", 2), ("16303\n", 1), ("11264\n", 1), ("81559\n", 3), ("", 1)):
+            with self.subTest(output=output), mock.patch.object(
+                jobs.subprocess, "run", return_value=mock.Mock(stdout=output)
+            ):
+                self.assertEqual(jobs.default_slots(), slots)
+
     def test_slots_run_jobs_side_by_side_and_exclusive_jobs_run_alone(self):
         with tempfile.TemporaryDirectory() as directory:
             store = jobs.JobStore(directory)

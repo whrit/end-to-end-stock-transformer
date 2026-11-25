@@ -3,7 +3,7 @@
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Iterator, List, Mapping, Optional, Tuple
 
 import numpy as np
@@ -11,7 +11,7 @@ import pandas as pd
 import psutil
 import torch
 
-from market_guided_stock_alpha.dataset.dataset import SequenceSample
+from market_guided_stock_alpha.dataset.dataset import SequenceDataset, SequenceSample
 from market_guided_stock_alpha.progress import duration_text, note, progress
 
 GIB = 1024 ** 3
@@ -226,11 +226,16 @@ def _batch_bytes(batch: DateBatch) -> int:
 class WholeDateLoader:
     """Deterministic iterator; it never creates random stock mini-batches.
 
-    With ``cache=True`` every date's batch is built once (in parallel threads)
-    and reused each epoch: on the GPU while ``gpu_cache_budget`` allows, then in
-    RAM while ``ram_cache_budget`` allows; dates beyond both are rebuilt every
-    epoch as without the cache. Batches and their order are unchanged, so
-    training results are identical with or without it."""
+    With ``cache=True`` an Alpha158-only ``SequenceDataset`` first tries a row
+    table: every (date, security) row its samples read is normalized once (8
+    overlapping history windows share each row) and kept on the GPU within
+    ``gpu_cache_budget``, else in RAM within ``ram_cache_budget``; each batch
+    gathers ``[N, lookback, F]`` from it. Otherwise, or when the table fits
+    neither, every date's batch is built once (in parallel threads) and reused
+    each epoch: on the GPU while ``gpu_cache_budget`` allows, then in RAM while
+    ``ram_cache_budget`` allows; dates beyond both are rebuilt every epoch as
+    without the cache. Batches and their order are unchanged, so training
+    results are identical either way."""
 
     date_batch_size = 1
 
@@ -249,6 +254,7 @@ class WholeDateLoader:
         self.epoch = 0
         self.cache = bool(cache)
         self._cached: Optional[List[Optional[DateBatch]]] = None
+        self._table: Optional[Tuple[torch.Tensor, torch.Tensor, List[torch.Tensor]]] = None
 
     def set_epoch(self, epoch: int) -> None:
         self.epoch = int(epoch)
@@ -261,6 +267,45 @@ class WholeDateLoader:
         if isinstance(value, DateBatch):
             return value if value.stock_features.device == device else move_date_batch(value, device)
         return adapt_sequence_sample(value, device)
+
+    def _fill_table(self) -> bool:
+        """Build the row table (see the class docstring); False if it does not apply or fit."""
+        dataset = self.dataset
+        if not isinstance(dataset, SequenceDataset) or dataset.layout.stock_families != ("alpha158",):
+            return False
+        started = time.monotonic()
+        rows, index = dataset.stock_row_index()
+        features = len(dataset.artifacts["alpha158"].feature_names)
+        entries = sum(item.size for item in index)
+        # rows (float32 + observed flag) + int64 indices; per-date labels/masks/market stay on self.device
+        size = rows.shape[0] * (4 * features + 1) + entries * 8
+        gpu_budget = gpu_cache_budget(self.device) - len(index) * 4096 - entries // 8 * 13
+        if size <= gpu_budget:
+            place = self.device
+        elif size <= ram_cache_budget():
+            place = torch.device("cpu")
+        else:
+            note("row table needs {:.1f} GiB, more than the GPU or RAM budget: caching whole dates".format(size / GIB))
+            return False
+        table = torch.empty((rows.shape[0], features), dtype=torch.float32, device=place)
+        observed = torch.empty(rows.shape[0], dtype=torch.bool, device=place)
+        starts = np.flatnonzero(np.diff(rows[:, 0], prepend=-1))
+        ends = np.append(starts[1:], rows.shape[0])
+        with ThreadPoolExecutor(_cache_workers()) as pool:
+            built = pool.map(lambda span: dataset.stock_rows(int(rows[span[0], 0]), rows[span[0]:span[1], 1]), zip(starts, ends))
+            for start, end, (values, flags) in zip(starts, ends, progress(built, desc="row table", unit="date", total=len(starts), leave=False)):
+                table[start:end] = torch.from_numpy(values)
+                observed[start:end] = torch.from_numpy(np.ascontiguousarray(flags))
+            light = list(pool.map(lambda position: adapt_sequence_sample(dataset.sample(position, stock=False), self.device), range(len(dataset))))
+        self._cached = light
+        self._table = (table, observed, [torch.from_numpy(item).to(place) for item in index])
+        note(
+            "row table: {} rows for {} dates in {}, {:.1f} GiB on {} ({:.1f}x fewer rows than whole dates)".format(
+                rows.shape[0], len(index), duration_text(time.monotonic() - started), size / GIB,
+                "GPU" if place.type == "cuda" else place.type, entries / max(1, rows.shape[0]),
+            )
+        )
+        return True
 
     def _fill_cache(self) -> List[Optional[DateBatch]]:
         started = time.monotonic()
@@ -296,11 +341,15 @@ class WholeDateLoader:
         positions = np.arange(len(self.dataset), dtype="int64")
         if self.shuffle:
             np.random.default_rng(self.seed + self.epoch).shuffle(positions)
-        if self.cache and self._cached is None:
+        if self.cache and self._cached is None and not self._fill_table():
             self._cached = self._fill_cache()
         for position in positions:
             batch = self._cached[position] if self._cached is not None else None
-            if batch is None:
+            if self._table is not None:
+                table, observed, index = self._table
+                rows = index[position]
+                yield replace(batch, stock_features=table[rows].to(self.device), stock_mask=observed[rows].to(self.device))
+            elif batch is None:
                 yield self._build(int(position), self.device)
             elif batch.stock_features.device != self.device:
                 yield move_date_batch(batch, self.device)
