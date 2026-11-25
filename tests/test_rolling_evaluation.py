@@ -348,7 +348,12 @@ class InitializationAndRollingSmokeTest(unittest.TestCase):
                 early_stopping=EarlyStoppingConfig(enabled=False, patience=1, minimum_epochs=1),
                 seed=seed,
             )
-            result = RollingRunner(root / "runs", "cpu").run(
+            finished = []
+            on_target = lambda path: finished.append(
+                (path.relative_to(root / "runs").as_posix(), (path / "metrics.json").is_file(),
+                 (path / "checkpoints/best.pt").is_file())
+            )
+            result = RollingRunner(root / "runs", "cpu", on_target=on_target).run(
                 RollingRunConfig("tiny", seeds=(42, 43), initialization=InitializationMode.WARM),
                 targets,
                 RollingDataBundle(
@@ -358,6 +363,11 @@ class InitializationAndRollingSmokeTest(unittest.TestCase):
                 FeatureLayout.stage1(),
                 lambda layout, _seed: TinyRegressor(layout.stock_dim),
                 training_factory,
+            )
+            # Each target is handed over complete, as it finishes (what remote runs upload).
+            self.assertEqual(
+                finished,
+                [("tiny/seed_{}/target_{}".format(seed, target), True, True) for seed in (42, 43) for target in ("T1", "T2")],
             )
             self.assertIsNotNone(result["ensemble_evaluation"])
             self.assertEqual(

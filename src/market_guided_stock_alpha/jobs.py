@@ -70,6 +70,21 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def _upload_tree(store: "JobStore", source: Path, location: str) -> None:
+    """Copy a local directory to ``location`` (``r2://bucket/key`` or a local path)."""
+    files = [path for path in sorted(source.rglob("*")) if path.is_file()]
+    if not location.startswith(R2_SCHEME):
+        for path in files:
+            target = Path(location) / path.relative_to(source)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(str(path), str(target))
+        return
+    bucket, _, prefix = location[len(R2_SCHEME):].partition("/")
+    for path in files:
+        key = "{}/{}".format(prefix.strip("/"), path.relative_to(source).as_posix())
+        _retry(store.client.upload_file, str(path), bucket, key)
+
+
 def _r2_client() -> Any:
     import boto3  # type: ignore[import-not-found]
 
@@ -297,9 +312,34 @@ class Agent(object):
                 print("heartbeat failed: {}".format(error), file=sys.stderr, flush=True)
             time.sleep(HEARTBEAT_SECONDS)
 
+    def salvage(self) -> None:
+        """Upload the run folders of jobs this machine was running when it stopped
+        (e.g. out of credit), mark them stopped, so ``submit --resume`` continues
+        from their finished targets instead of starting over."""
+        if not self.workdir.is_dir():
+            return
+        for folder in sorted(path for path in self.workdir.iterdir() if path.is_dir()):
+            try:
+                job = self.store.get_json("{}/job.json".format(folder.name))
+                state = (self.store.get_json("{}/state.json".format(folder.name)) or {}).get("state")
+                if job is None or state in FINAL_STATES or not job.get("run_location"):
+                    continue
+                runs = [
+                    path for path in (folder / "tmp").rglob(str(job["experiment"]))
+                    if path.is_dir() and (path / "config.json").is_file()
+                ]
+                for run in runs:
+                    _upload_tree(self.store, run, str(job["run_location"]))
+                self._state(folder.name, "stopped", ended_at=now_iso(), salvaged=bool(runs))
+                print("job {} salvaged ({} run folder(s)); resubmit with --resume".format(folder.name, len(runs)), flush=True)
+            except Exception as error:  # never block the agent on a rescue attempt
+                print("job {} salvage failed: {}".format(folder.name, error), file=sys.stderr, flush=True)
+
     def run_forever(self) -> None:
         # Job folders hold a full locked environment (~5 GB); left over from a crash
-        # or an older agent they fill the instance disk, so start from an empty workdir.
+        # or an older agent they fill the instance disk, so start from an empty workdir,
+        # after saving whatever an interrupted job had already trained.
+        self.salvage()
         shutil.rmtree(str(self.workdir), ignore_errors=True)
         threading.Thread(target=self._heartbeat_loop, daemon=True).start()
         print("agent {} on {} watching {} ({} slots per GPU)".format(self.name, self.gpu, self.store.root, self.slots), flush=True)

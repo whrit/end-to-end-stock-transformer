@@ -42,6 +42,30 @@ class JobQueueTest(unittest.TestCase):
             self.assertFalse((Path(directory) / "work" / "j1").exists())
             self.assertEqual((agent.state, agent.job), ("idle", None))
 
+    def test_startup_salvages_runs_of_jobs_the_machine_lost(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = jobs.JobStore(directory + "/queue")
+            runs = Path(directory) / "runs" / "exp"
+            store.put_json("j1/job.json", {"id": "j1", "experiment": "exp", "run_location": str(runs)})
+            store.put_json("j1/state.json", {"state": "running"})
+            store.put_json("j2/job.json", {"id": "j2", "experiment": "done_exp", "run_location": str(runs) + "_done"})
+            store.put_json("j2/state.json", {"state": "done"})
+            work = Path(directory) / "work"
+            trained = work / "j1" / "tmp" / "tmpab12" / "output" / "exp"
+            (trained / "seed_42" / "target_2012H1").mkdir(parents=True)
+            (trained / "config.json").write_text("{}")
+            (trained / "seed_42" / "target_2012H1" / "metrics.json").write_text("{}")
+            (work / "j2" / "tmp" / "x" / "output" / "done_exp").mkdir(parents=True)
+            (work / "j2" / "tmp" / "x" / "output" / "done_exp" / "config.json").write_text("{}")
+            with mock.patch.object(jobs, "gpu_name", return_value="test GPU"):
+                agent = jobs.Agent(store, "a", work)
+            agent.salvage()
+            self.assertTrue((runs / "seed_42" / "target_2012H1" / "metrics.json").is_file())
+            state = store.get_json("j1/state.json")
+            self.assertEqual((state["state"], state["salvaged"]), ("stopped", True))
+            self.assertFalse(Path(str(runs) + "_done").exists())  # finished jobs already published
+            self.assertEqual(store.get_json("j2/state.json")["state"], "done")
+
     def test_r2_blip_during_a_job_neither_fails_nor_orphans_it(self):
         import sys
 

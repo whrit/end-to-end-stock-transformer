@@ -498,10 +498,18 @@ def _build_dataset(
 class RollingRunner:
     """Train, predict, evaluate, aggregate, and ensemble one experiment."""
 
-    def __init__(self, output_root: Path, device: Any = None, reference: Optional[Reference] = None) -> None:
+    def __init__(
+        self,
+        output_root: Path,
+        device: Any = None,
+        reference: Optional[Reference] = None,
+        on_target: Optional[Callable[[Path], None]] = None,
+    ) -> None:
         self.output_root = Path(output_root)
         self.device = device
         self.reference = reference
+        # Called with each newly finished target directory (e.g. to upload it).
+        self.on_target = on_target
 
     def run(
         self,
@@ -672,6 +680,8 @@ class RollingRunner:
                 prediction_by_seed[int(seed)][target.target_id] = frame
                 target_summaries.append(summary)
                 monitor.finish(seed, target, summary, frame, resumed)
+                if self.on_target is not None and not resumed:
+                    self.on_target(target_root)
 
             overall = aggregate_overall(target_summaries)
             overall.update({"seed": int(seed), "kind": "individual_seed_overall"})
@@ -873,6 +883,8 @@ class RollingRunner:
                 prediction_by_seed[int(seed)][target.target_id] = frame
                 target_summaries.append(summary)
                 monitor.finish(seed, target, summary, frame, resumed)
+                if self.on_target is not None and not resumed:
+                    self.on_target(target_root)
             overall = aggregate_overall(target_summaries)
             overall.update({"seed": int(seed), "kind": "individual_seed_overall"})
             atomic_write_json(run_root / "seed_{}".format(seed) / "overall.json", overall)

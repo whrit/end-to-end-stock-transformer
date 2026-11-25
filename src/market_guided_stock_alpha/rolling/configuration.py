@@ -350,8 +350,8 @@ def _run_document(
 
     reference = None if compare is None else _ReferenceRun(compare, cache / "reference")
 
-    def execute(output_root: Path) -> Dict[str, Any]:
-        runner = RollingRunner(output_root, device, reference)
+    def execute(output_root: Path, on_target: Any = None) -> Dict[str, Any]:
+        runner = RollingRunner(output_root, device, reference, on_target)
         if document["model"]["family"] == "lightgbm":
             return runner.run_lightgbm(
                 run_config, targets, bundle, layout, validated["training"]
@@ -380,8 +380,19 @@ def _run_document(
             ).parent
         except FileNotFoundError:
             pass
+
+    def publish_target(target_root: Path) -> None:
+        # Each target on R2 as soon as it finishes: a lost machine then costs one
+        # target, and --resume continues from the rest. A failed upload is caught
+        # up by the final publish of the whole run.
+        relative = target_root.relative_to(local_root).as_posix()
+        try:
+            storage.publish(target_root, "{}/{}".format(remote_root, relative), overwrite=True, quiet=True)
+        except Exception as error:
+            note(("target upload failed ({}); continuing".format(error), "yellow"))
+
     try:
-        result = dict(execute(local_root))
+        result = dict(execute(local_root, publish_target))
         # The local cache is deleted on return; report where the run lives.
         result["run_directory"] = "{}/{}".format(remote_root, run_config.experiment_name)
         return result
